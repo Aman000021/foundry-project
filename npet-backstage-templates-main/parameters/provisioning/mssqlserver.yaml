@@ -1,0 +1,31 @@
+title: Databases Configuration
+properties:
+  mssqldatabases:
+    title: Databases
+    description: List of databases to create in this MSSQL Server.
+    type: array
+    items:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          title: Database Name
+          type: string
+        storage:
+          title: Storage
+          description: Currently max is 240 GB. For larger needs, raise a ticket to the Platform team.
+          type: number
+          default: 4
+          enum:
+            - 4
+            - 8
+            - 32
+            - 40
+            - 80
+          enumNames:
+            - 12 Gb
+            - 24 Gb
+            - 96 Gb
+            - 120 Gb
+            - 240 Gb

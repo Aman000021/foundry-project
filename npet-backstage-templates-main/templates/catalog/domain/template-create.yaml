@@ -1,0 +1,47 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: create-domain-template
+  title: Backstage Domain Creation
+  description: Creates a Domain in Backstage.
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - entities
+    - create
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: catalog
+
+  parameters:
+    - $yaml: ../../../parameters/catalog/entity-metadata-common.yaml
+
+    - title: Catalog Domain Parameters
+      required:
+        - owner
+      properties:
+        owner:
+          title: Owner
+          type: string
+          description: Owner of the entity.
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: [Group, User]
+        domain:
+          title: Parent Domain
+          description: Parent domain of this domain.
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: [Domain]
+
+    - $yaml: ../../../parameters/catalog/catalog-repository.yaml
+
+  steps:
+    - $yaml: ../../../steps/catalog/domain.yaml
+    - $yaml: ../../../steps/github/publish.yaml
+
+  output:
+    links:
+      - $yaml: ../../../outputs/github-repository.yaml

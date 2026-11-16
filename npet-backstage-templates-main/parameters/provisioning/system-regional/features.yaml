@@ -1,0 +1,15 @@
+title: Features
+properties:
+  features:
+    title: Select features
+    type: array
+    default: []
+    uniqueItems: true
+    ui:widget: checkboxes
+    items:
+      type: string
+      enum:
+        - notification
+        - metrics
+        - nats
+        - content-delivery

@@ -1,0 +1,197 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: npet-foundry-infra-deployment
+  title: CAF II - Deploy Platorm + Agent Service stacks
+  description: |
+   Setting up the environment for the Foundry deployment  
+   The platform foundation and the agent service infrastructure 
+   required for this Foundry solution will be deployed through 
+   the repository Terraform workflows.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - terraform
+    - caf
+    - foundry
+    - platform
+  
+spec:
+  owner: group:default/AAD-SG-backstage-innovation
+  type: cloud-template
+
+
+  parameters:
+    - title: System Association
+      required:
+        - ref
+      properties:
+        ref:
+          title: Parent System
+          description: System to associate this Resource Group to.
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+
+    - title: Deployment target
+      required:
+        - environment
+        - layer
+      properties:
+        environment:
+          title: Environment
+          type: string
+          description: Target environment for the deployment.
+          default: dev
+          enum:
+            - dev
+            - prod
+          enumNames:
+            - Dev (dv)
+            - Prod (pr)
+        layer:
+          title: Stack layer
+          type: string
+          description: >-
+            Platform deploys the platform hub + Foundry resource hub.
+            Agent Service deploys the agent-service capability stack.
+          default: Platform
+          enum:
+            - Platform
+            - Agent Service
+
+    - title: Project coordinates
+      required:
+        - segment
+        - location
+      properties:
+        segment:
+          title: Project segment
+          type: string
+          description: Maps to the `segment` workflow input.
+          default: marketing
+          enum:
+            - marketing
+        location:
+          title: Project location
+          type: string
+          description: Maps to the `location` workflow input.
+          default: europe
+          enum:
+            - europe
+
+    - title: Execution mode
+      required:
+        - branch
+      properties:
+        branch:
+          title: Branch to run against
+          type: string
+          description: >-
+            IMPORTANT: the plan jobs run on any branch, but the manual-approval
+            and `terraform apply` jobs ONLY run when the branch is
+            `updated-foundry-deployment`. Any other branch is plan-only.
+          default: main
+          enum:
+            - main
+            - updated-foundry-deployment
+          enumNames:
+            - main (plan only)
+            - updated-foundry-deployment (plan + approval + apply)
+        confirmApply:
+          title: I understand apply runs only on updated-foundry-deployment
+          type: boolean
+          default: false
+
+  steps:
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.ref }}
+
+    - id: dispatch
+      name: Dispatch iac.yaml pipeline
+      action: github:actions:dispatch-with-response
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-foundry-template
+        workflowId: iac.yaml
+        branchOrTagName: ${{ parameters.branch }}
+        waitForActionCompletion: true
+        workflowInputs:
+          choice: >-
+            Deploy ${{ (parameters.environment == "dev" and "Dev") or "Prod" }} ${{ parameters.layer }}
+          segment: ${{ parameters.segment }}
+          location: ${{ parameters.location }}
+
+
+    - id: create-resource-yaml
+      name: Scaffold Resource YAML for Catalog
+      action: fetch:template:file
+      input:
+        url: ./content/resource.yaml.njk
+        targetPath: >-
+          ./resources/glbl-${{ (parameters.environment == "dev" and "dv") or "pr" }}-foundry-${{ parameters.segment }}-${{ (parameters.location == "europe" and "euwe") or parameters.location }}-${{ (parameters.layer == "Platform" and "platform") or "agent-service" }}.yaml
+        values:
+          name: >-
+            glbl-${{ (parameters.environment == "dev" and "dv") or "pr" }}-foundry-${{ parameters.segment }}-${{ (parameters.location == "europe" and "euwe") or parameters.location }}-${{ (parameters.layer == "Platform" and "platform") or "agent-service" }}
+          description: >-
+            ${{ parameters.layer }} deployment triggered from Backstage for the npet-foundry-template repository.
+          visibility: ${{ parameters.visibility }}
+          type: foundry-infrastructure
+          owner: ${{ steps['system-entity'].output.owner }}
+          domain: ${{ steps['system-entity'].output.domain }}
+          system: ${{ parameters.ref }}
+          tags:
+            - terraform
+            - azure
+            - foundry
+            - ${{ parameters.segment }}
+          annotations:
+            - key: nestle.com/resource-type
+              value: ${{ (parameters.layer == "Platform" and "foundry-platform") or "foundry-agent-service" }}
+            - key: nestle.com/parent-system
+              value: ${{ parameters.systemRef }}
+            - key: nestle.com/region
+              value: ${{ parameters.location }}
+            - key: nestle.com/environment
+              value: ${{ parameters.environment }}
+            - key: nestle.com/project-segment
+              value: ${{ parameters.segment }}
+            - key: nestle.com/deployment-layer
+              value: ${{ parameters.layer }}
+            - key: nestle.com/source-repo
+              value: nestle-it/npet-foundry-template
+            - key: nestle.com/source-workflow
+              value: iac.yaml
+            - key: nestle.com/source-branch
+              value: ${{ parameters.branch }}
+
+    - id: publish-resource
+      name: Create PR in Catalog Repo
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?owner=nestle-devtest&repo=npet-backstage-catalog
+        branchName: >-
+          foundry-resource-${{ parameters.segment }}-${{ parameters.environment }}-${{ (parameters.layer == "Platform" and "platform") or "agent-service" }}
+        title: >-
+          Register Foundry deployment - ${{ parameters.segment }} - ${{ parameters.environment }} - ${{ parameters.layer }}
+        description: >-
+          Backstage Resource registration for the deployment triggered from the
+          npet-foundry-template infrastructure template.
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+
+  output:
+    text:
+      - title: Dispatched deployment
+        content: |
+          Triggered **Deploy ${{ (parameters.environment == "dev" and "Dev") or "Prod" }} ${{ parameters.layer }}**
+          on branch `${{ parameters.branch }}` (segment `${{ parameters.segment }}`, location `${{ parameters.location }}`).
+   

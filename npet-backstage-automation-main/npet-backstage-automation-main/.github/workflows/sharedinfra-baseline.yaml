@@ -1,0 +1,483 @@
+name: Create the baseline infrastructure in Azure
+run-name: SharedInfra Baseline (Pre + Post) - SPN & UMI, Storage, Subnet + Role Setup [${{ inputs.UUID }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      variables: { type: string, required: true } # Values coming from Backstage Annotations ( System + Resource)
+      systemSlug: { type: string, required: true } # System identifier for catalog paths
+      environmentName: { type: string, required: true } # Target environment (pr, dv, etc.)
+      resourceGroupName: { type: string, required: true } # Azure resource group name
+      subscriptionName: { type: string, required: true } # Azure subscription name
+      subscriptionId: { type: string, required: true } # Azure subscription ID
+      organization: { type: string, required: true, default: "nestle-devtest" } # Organization for catalog paths
+      domain: { type: string, required: false, default: "nestle" }
+      templates: { type: string, required: true }
+      UUID:
+        {
+          type: string,
+          required: false,
+          default: "00000000-0000-0000-0000-000000000000",
+        }
+
+  workflow_call:
+    inputs:
+      variables: { type: string, required: true }
+      systemSlug: { type: string, required: true }
+      environmentName: { type: string, required: true }
+      resourceGroupName: { type: string, required: true }
+      subscriptionName: { type: string, required: true }
+      subscriptionId: { type: string, required: true }
+      organization: { type: string, required: true, default: "nestle-devtest" }
+      domain: { type: string, required: false, default: "nestle" }
+      templates: { type: string, required: true }
+      UUID:
+        {
+          type: string,
+          required: false,
+          default: "00000000-0000-0000-0000-000000000000",
+        }
+    outputs:
+      tf_json_b64:
+        description: "Terraform Outputs"
+        value: ${{ jobs.terraform_prereqs.outputs.tf_json_b64 }}
+
+env:
+  # Azure authentication and target subscription
+  ARM_CLIENT_ID: ${{ vars.CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ inputs.subscriptionId }}
+
+  # Terraform state configuration
+  tfsubscription_id: "185e5521-d856-4860-ac4a-20be7d5779d9"
+  tfstate_rg: "glbl-dv-npet-sharedinfra-euwe-rgp"
+  tfstate_storage_account: "glbldvnpetshrdinfeuwesta"
+  tfstate_container_name: "tfstsharedinfra"
+  tfstate_key: "test.terraform.tfstate"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform_prereqs:
+    outputs:
+      tf_json_b64: ${{ steps.capture.outputs.json_b64 }}
+    environment: pr
+    runs-on: [self-hosted, Linux, X64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate a token
+        id: generate_token_for_accessing_modules
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.NPET_REGISTRY_APPID }}
+          private-key: ${{ secrets.NPET_REGISTRY_PRIVATE_KEY }}
+          owner: nestle-it
+
+      - uses: actions/checkout@v4
+        with:
+          repository: nestle-it/npet-backstage-terraform
+          ref: main
+          path: terraform-src
+          token: ${{ steps.generate_token_for_accessing_modules.outputs.token }}
+
+      - id: setup-tfvars
+        shell: bash
+        run: |
+          echo '${{ inputs.variables }}' > terraform-src/prerequisites/tf_input_var.json
+
+      - id: tfstate
+        shell: bash
+        run: |
+          echo "file=${{ inputs.subscriptionName }}_${{ inputs.resourceGroupName }}.terraform.tfstate" >> $GITHUB_OUTPUT
+
+      - uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ inputs.subscriptionId }}
+          enable-AzPSSession: true
+
+      - name: terraform init
+        working-directory: terraform-src/prerequisites
+        run: |
+          git config --global url."https://x-access-token:${{ steps.generate_token_for_accessing_modules.outputs.token }}@github.com/nestle-it".insteadOf "https://github.com/nestle-it"
+          terraform init \
+            -backend-config="subscription_id=${{ env.tfsubscription_id }}" \
+            -backend-config="resource_group_name=${{ env.tfstate_rg }}" \
+            -backend-config="storage_account_name=${{ env.tfstate_storage_account }}" \
+            -backend-config="container_name=${{ env.tfstate_container_name }}" \
+            -backend-config="key=${{ env.tfstate_key }}/${{ steps.tfstate.outputs.file }}"
+
+      - name: terraform plan
+        working-directory: terraform-src/prerequisites
+        run: |
+          terraform plan \
+            -var environment='${{ inputs.environmentName }}' \
+            -var subscription_id='${{ inputs.subscriptionId }}' \
+            -var-file=tf_input_var.json
+
+      - name: terraform apply
+        working-directory: terraform-src/prerequisites
+        run: |
+          terraform apply -auto-approve \
+            -var environment='${{ inputs.environmentName }}' \
+            -var subscription_id='${{ inputs.subscriptionId }}' \
+            -var-file=tf_input_var.json
+
+      - name: capture terraform outputs
+        id: capture
+        working-directory: terraform-src/prerequisites
+        run: |
+          terraform output -json > /tmp/tf_out.json
+          JSON_B64=$(base64 -w0 /tmp/tf_out.json)
+          echo "json_b64=$JSON_B64" >> "$GITHUB_OUTPUT"
+
+  # Update Backstage catalog with infrastructure outputs
+  commit_catalog:
+    needs: terraform_prereqs
+    runs-on: ubuntu-latest
+    environment: pr
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mint GitHub-App token
+        id: gh_app_tok_catalog
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.AUTH_GITHUB_ORG_APP_ID }}
+          private-key: ${{ secrets.AUTH_GITHUB_ORG_PRIVATE_KEY }}
+          owner: ${{ inputs.organization }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.organization }}/npet-backstage-catalog
+          path: catalog
+          token: ${{ steps.gh_app_tok_catalog.outputs.token }}
+
+      - name: install yq + jq
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y jq
+          curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+
+      - name: Debug environment and file structure
+        run: |
+          echo "========== Environment Information ==========="
+          echo "Working directory: $(pwd)"
+          echo "User: $(whoami)"
+          echo "Environment name: ${{ inputs.environmentName }}"
+          echo "System slug: ${{ inputs.systemSlug }}"
+          echo "Resource group: ${{ inputs.resourceGroupName }}"
+          
+          echo "========== File Structure ==========="
+          echo "Listing catalog directory:"
+          ls -la catalog/
+          
+          echo "Listing domain directory:"
+          ls -la catalog/${{ inputs.domain }}/
+          
+          echo "Listing systems directory:"
+          ls -la catalog/${{ inputs.domain }}/systems/ || echo "Systems directory doesn't exist"
+          
+          echo "Listing system slug directory:"
+          ls -la catalog/${{ inputs.domain }}/systems/${{ inputs.systemSlug }}/ || echo "System slug directory doesn't exist"
+          
+          echo "Listing resources directory:"
+          ls -la catalog/${{ inputs.domain }}/systems/${{ inputs.systemSlug }}/resources/ || echo "Resources directory doesn't exist"
+
+      - name: YAML Injection - inject terraform outputs
+        env:
+          TEMPLATE_INPUT: ${{ inputs.templates }}
+          TF_JSON_B64: ${{ needs.terraform_prereqs.outputs.tf_json_b64 }}
+        run: |
+          set -euo pipefail
+          echo "$TF_JSON_B64" | base64 -d > /tmp/tf.json
+
+          RG_FILE="catalog/${{ inputs.domain }}/systems/${{ inputs.systemSlug }}/resources/${{ inputs.resourceGroupName }}.yaml"
+
+          echo "Available keys in terraform output:"
+          jq -r 'keys[]' /tmp/tf.json
+
+          declare -A MAP=(
+            [common.sharedinfra.nestle.com/app-sso]='[ .spn.value.app_sso ] | map(select(. != null))'
+            [common.sharedinfra.nestle.com/terraform-storageaccount]='[ .sta.value.tf_stf ] | map(select(. != null))'
+            [common.sharedinfra.nestle.com/terraform-storageaccount-container]='[ .sta_cont.value[0].tfstate ] | map(select(. != null))'
+            [common.sharedinfra.nestle.com/subnet-delegation]='.snet.value'
+            [common.sharedinfra.nestle.com/umi-federation]='[ .umi.value.federation ] | map(select(. != null))'
+            [webapp.sharedinfra.nestle.com/umi-paas-sql]='[ .umi.value.paas_sql ] | map(select(. != null))'
+            [webapp.sharedinfra.nestle.com/dba-entra-grp]='[ .entra_grp.value.dba_entra_grp ] | map(select(. != null))'
+          )
+
+          for key in "${!MAP[@]}"; do
+            value=$(jq -c "${MAP[$key]}" /tmp/tf.json)
+
+            if [[ "$value" != "null" && "$value" != "[]" ]]; then
+              echo "✔️ Adding ${key} = $value"
+              export value
+              # Here we use strenv to assign the JSON as a string.
+              yq eval --inplace \
+                ".metadata.annotations.\"${key}\" = strenv(value)" \
+                "$RG_FILE"
+            else
+              echo "🚫 Skipping/removing ${key}"
+              yq eval --inplace "del(.metadata.annotations.\"${key}\")" "$RG_FILE" || true
+            fi
+          done
+
+          yq eval --inplace '
+            .metadata.annotations."nestle.com/template-type" = strenv(TEMPLATE_INPUT) |
+            .metadata.annotations |= (
+              [ to_entries | map(select(.key | test("^nestle\\.com/"))) ,
+                to_entries | map(select(.key | test("^nestle\\.com/") | not)) ]
+              | flatten
+              | from_entries
+            )
+          ' "$RG_FILE"
+
+          echo "✅ Final Result:"
+          cat "$RG_FILE"
+
+      - name: Commit & push - catalog
+        shell: bash
+        env:
+          RG_FILE_REL: "${{ inputs.domain }}/systems/${{ inputs.systemSlug }}/resources/${{ inputs.resourceGroupName }}.yaml"
+        run: |
+          set -euo pipefail
+          cd catalog
+          if [[ ! -f "$RG_FILE_REL" ]]; then
+            echo "::error::File Not found: $RG_FILE_REL"
+            exit 1
+          fi
+          git config user.name  "backstage-bot"
+          git config user.email "backstage-bot-gha@users.noreply.github.com"
+          if git diff --quiet -- "$RG_FILE_REL"; then
+            echo "No new changes to commit."
+          else
+            git add "$RG_FILE_REL"
+            git commit -m "feat(sharedinfra): updated outputs to  ${{ inputs.resourceGroupName }}"
+            git push origin HEAD:main
+          fi
+
+  # Create API permission issues for App registrations and Managed Identities
+  create_api_permission_issues:
+    needs: terraform_prereqs
+    runs-on: [self-hosted, Linux, X64]
+    environment: pr
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mint GitHub-App token (Backstage federated app)
+        id: gh_app_tok
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.AUTH_GITHUB_ORG_APP_ID }}
+          private-key: ${{ secrets.AUTH_GITHUB_ORG_PRIVATE_KEY }}
+          owner: nestle-it
+
+      - id: extract_ids
+        env:
+          TF_JSON_B64: ${{ needs.terraform_prereqs.outputs.tf_json_b64 }}
+        run: |
+          set -euo pipefail
+          echo "$TF_JSON_B64" | base64 -d > tf.json
+          # Extract IDs needed for API permission requests
+          echo "app_sso_id=$(jq -r '.spn.value.app_sso.object_id'      tf.json)" >>"$GITHUB_OUTPUT"
+          echo "umi_paas_id=$(jq -r '.umi.value.paas_sql.principal_id' tf.json)" >>"$GITHUB_OUTPUT"
+
+      - name: Create API-permission issue (App registration)
+        id: create_issue_app
+        if: ${{ contains('npet-webapp-template,npet-webapp-template-dev,npet-webapp-postgres-template,npet-ragai-template,npet-ragai-template-dev', fromJson(inputs.variables).templates) }}
+        shell: pwsh
+        env:
+          ISSUE_REPO: "aad-automation"
+          APM_ID: ${{ fromJson(inputs.variables).apm_id }}
+          OBJ_ID: ${{ steps.extract_ids.outputs.app_sso_id }}
+          TEMPLATE: ${{ fromJson(inputs.variables).templates }}
+        run: |
+          # Set permissions based on template type
+          if ($env:TEMPLATE -like 'npet-ragai-template*') {
+            $delegated   = 'user.read'
+            $application = ''
+          } else {
+            $delegated   = 'offline_access,profile,user.read'
+            $application = ''
+          }
+          pwsh ./.scripts/create-api-permission-issue.ps1 `
+            -Issue_Create_Repo           $env:ISSUE_REPO `
+            -Apm_Id                      $env:APM_ID `
+            -AAD_Object_Id               $env:OBJ_ID `
+            -Id_Type                     'App registration (application)' `
+            -Delegated_Permission_List   $delegated `
+            -Application_Permission_List $application `
+            -Pat                         '${{ steps.gh_app_tok.outputs.token }}'
+
+          ## Waiting removed to avoid breaking the pipeline and the whole CPW process in Backstage, 
+          ## this step can be manually done later is necessary
+      # - name: Wait issue closure (App registration)
+      #   if: steps.create_issue_app.outputs.fet_issue_number != ''
+      #   id: wait_app
+      #   shell: bash
+      #   env:
+      #     GH_TOKEN: ${{ steps.gh_app_tok.outputs.token }}
+      #     ISSUE_NUM: ${{ steps.create_issue_app.outputs.fet_issue_number }}
+      #     ISSUE_REPO: aad-automation
+      #   run: |
+      #     set -euo pipefail
+      #     echo "Waiting for closure of issue #$ISSUE_NUM in $ISSUE_REPO"
+      #     time_limit_in_sec=600
+      #     while true; do
+      #       state=$(gh issue view "$ISSUE_NUM" -R "nestle-it/$ISSUE_REPO" --json state -q '.state')
+      #       echo "Current state: $state"
+      #       [[ "$state" == "CLOSED" ]] && break
+      #       ((time_limit_in_sec-=10)) || true
+      #       [[ $time_limit_in_sec -le 0 ]] && { echo "Timeout waiting for issue close"; exit 1; }
+      #       sleep 10
+      #     done
+
+      - name: Create API-permission issue (Managed Identity)
+        id: create_issue_mi
+        if: ${{ contains('npet-webapp-template,npet-webapp-template-dev', fromJson(inputs.variables).templates) }}
+        shell: pwsh
+        env:
+          ISSUE_REPO: "aad-automation"
+          APM_ID: ${{ fromJson(inputs.variables).apm_id }}
+          OBJ_ID: ${{ steps.extract_ids.outputs.umi_paas_id }}
+        run: |
+          pwsh ./.scripts/create-api-permission-issue.ps1 `
+            -Issue_Create_Repo           $env:ISSUE_REPO `
+            -Apm_Id                      $env:APM_ID `
+            -AAD_Object_Id               $env:OBJ_ID `
+            -Id_Type                     'Enterprise application (service principal or managed identity)' `
+            -Delegated_Permission_List   '' `
+            -Application_Permission_List 'Application.Read.All,GroupMember.Read.All,User.Read.All' `
+            -Pat                         '${{ steps.gh_app_tok.outputs.token }}'
+
+        ## Waiting removed to avoid breaking the pipeline and the whole CPW process in Backstage, 
+        ## this step can be manually done later is necessary
+      # - name: Wait issue closure (Managed Identity)
+      #   if: steps.create_issue_mi.outputs.fet_issue_number != ''
+      #   shell: bash
+      #   env:
+      #     GH_TOKEN: ${{ steps.gh_app_tok.outputs.token }}
+      #     ISSUE_NUM: ${{ steps.create_issue_mi.outputs.fet_issue_number }}
+      #     ISSUE_REPO: aad-automation
+      #   run: |
+      #     set -euo pipefail
+      #     echo "Waiting for closure of issue #$ISSUE_NUM in $ISSUE_REPO"
+      #     time_limit_in_sec=600
+      #     while true; do
+      #       state=$(gh issue view "$ISSUE_NUM" -R "nestle-it/$ISSUE_REPO" --json state -q '.state')
+      #       echo "Current state: $state"
+      #       [[ "$state" == "CLOSED" ]] && break
+      #       ((time_limit_in_sec-=10)) || true
+      #       [[ $time_limit_in_sec -le 0 ]] && { echo "Timeout waiting for issue close"; exit 1; }
+      #       sleep 10
+      #     done
+
+  # Run post-prerequisites terraform to complete infrastructure setup
+  terraform_post_prereqs:
+    needs: terraform_prereqs
+    environment: pr
+    runs-on: [self-hosted, Linux, X64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mint registry-token
+        id: gh_mod_tok
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.NPET_REGISTRY_APPID }}
+          private-key: ${{ secrets.NPET_REGISTRY_PRIVATE_KEY }}
+          owner: nestle-it
+
+      - uses: actions/checkout@v4
+        with:
+          repository: nestle-it/npet-backstage-terraform
+          ref: main
+          path: terraform-src
+          token: ${{ steps.gh_mod_tok.outputs.token }}
+
+      - name: Build tf_input_var.json
+        id: tfvars_post
+        shell: bash
+        env:
+          BASE_VARS: "${{ inputs.variables }}"
+          TF_JSON_B64: ${{ needs.terraform_prereqs.outputs.tf_json_b64 }}
+        run: |
+          set -euo pipefail
+          ls -la terraform-src/post-prerequisites
+          ls -la terraform-src/
+
+          # Prepare input files
+          echo "$BASE_VARS"   | jq '.'   > /tmp/base.json
+          echo "$TF_JSON_B64" | base64 -d > /tmp/out.json
+
+          echo "### base.json"
+          cat /tmp/base.json | jq .
+
+          cat /tmp/out.json  | jq 'keys'
+
+          # Merge terraform outputs with base variables
+          jq -s '
+            .[0].environments[0] += {
+              spn:        { app_sso:       .[1].spn.value.app_sso },
+              entra_grp:  { dba_entra_grp: .[1].entra_grp.value.dba_entra_grp },
+              sta:        { tf_stf:        .[1].sta.value.tf_stf },
+              sta_cont:   [ { tfstate:     .[1].sta_cont.value[0].tfstate } ],
+              snet:            .[1].snet.value,
+              umi:        { federation:    .[1].umi.value.federation,
+                             paas_sql:     .[1].umi.value.paas_sql }
+            }
+            | .[0]
+          ' /tmp/base.json /tmp/out.json \
+          > terraform-src/post-prerequisites/tf_input_var.json
+
+          echo "########## tf_input_var.json (post pre requisites) ##########"
+          cat terraform-src/post-prerequisites/tf_input_var.json | jq .
+          ls -al terraform-src/post-prerequisites
+
+      - id: tfstate_post
+        shell: bash
+        run: |
+          echo "file=${{ inputs.subscriptionName }}_${{ inputs.resourceGroupName }}_post.terraform.tfstate" >> $GITHUB_OUTPUT
+
+      - uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ inputs.subscriptionId }}
+          enable-AzPSSession: true
+
+      - name: terraform init (post)
+        working-directory: terraform-src/post-prerequisites
+        run: |
+          git config --global url."https://x-access-token:${{ steps.gh_mod_tok.outputs.token }}@github.com/nestle-it".insteadOf "https://github.com/nestle-it"
+          terraform init \
+            -backend-config="subscription_id=${{ env.tfsubscription_id }}" \
+            -backend-config="resource_group_name=${{ env.tfstate_rg }}" \
+            -backend-config="storage_account_name=${{ env.tfstate_storage_account }}" \
+            -backend-config="container_name=${{ env.tfstate_container_name }}" \
+            -backend-config="key=${{ env.tfstate_key }}/${{ steps.tfstate_post.outputs.file }}"
+
+      - name: terraform plan (post)
+        working-directory: terraform-src/post-prerequisites
+        run: |
+          terraform plan \
+            -var environment='${{ inputs.environmentName }}' \
+            -var subscription_id='${{ inputs.subscriptionId }}' \
+            -var-file=tf_input_var.json
+
+      - name: terraform apply (post)
+        working-directory: terraform-src/post-prerequisites
+        run: |
+          terraform apply -auto-approve \
+            -var environment='${{ inputs.environmentName }}' \
+            -var subscription_id='${{ inputs.subscriptionId }}' \
+            -var-file=tf_input_var.json

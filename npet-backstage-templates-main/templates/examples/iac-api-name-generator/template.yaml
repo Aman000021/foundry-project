@@ -1,0 +1,67 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: name-generator-api
+  title: IAC-API - Name Generator Lookup
+  description: Generates a name for cloud resources using Nestle's Name Generator API standard.
+  annotations:
+    nestle.com/template-visibility: private
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: examples
+
+  parameters:
+    - title: Parameters
+      required:
+        - solution
+        - resourcetype
+        - scope
+        - environment
+      properties:
+        solution:
+          title: Solution Name
+          description: The name of the entity
+          type: string
+        resourcetype:
+          title: Resource Type
+          description: The type of the entity
+          type: string
+        scope:
+          title: Scope
+          description: The scope of the entity
+          type: string
+        environment:
+          title: Environment
+          description: The environment of the entity
+          type: string
+        region:
+          title: Region
+          description: The region of the entity
+          type: string
+        number:
+          title: Number
+          description: The number of the entity
+          type: string
+        context:
+          title: Context
+          description: The context of the entity
+          type: string
+
+  steps:
+    - id: name-generator-api
+      action: nestle:resource-name-generator
+      name: Name Generator API
+      input:
+        solution: ${{ parameters.solution }}
+        resourcetype: ${{ parameters.resourcetype }}
+        scope: ${{ parameters.scope }}
+        environment: ${{ parameters.environment }}
+        region: ${{ parameters.region }}
+        number: ${{ parameters.number }}
+        context: ${{ parameters.context }}
+
+  output:
+    text:
+      - title: Generated Name
+        content: ${{ steps['name-generator-api'].output.generatedName }}

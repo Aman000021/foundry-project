@@ -1,0 +1,185 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: agentic-foundry-umi-tasks
+  title: Create ADI MS Foundry Hosted Agent UMI Permissions
+  description: Creates a template to assign UMI permissions in Hosted Agent.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - foundry
+    - terraform
+    - end-user
+    - agent-service
+spec:
+  owner: group:default/aad-backstage-glbl-agenticplatform-genai
+  type: cloud-template
+
+  parameters:
+    - title: System Association
+      required:
+        - ref
+      properties:
+        ref:
+          title: Parent System
+          description: System to associate this Resource Group to.
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+    - title: Template Parameters
+      ui:order:
+        - environment
+        - capability
+        - segment
+        - location
+        - appName
+        - request
+        - foundryresource
+        - foundryproject
+        - umiObjectId
+        - umiClientId
+        - tenant
+        - namespace
+      properties:
+        capability:
+          title: Foundry Capability
+          type: string
+          description: Agent Service deploys the foundry project.
+          ui:disabled: true
+          ui:widget: hidden
+          oneOf:
+            - title: Hosted Agent
+              const: hostedagent
+        tenant:
+          title: Tenant
+          type: string
+          ui:disabled: true
+          ui:widget: hidden
+          oneOf:
+            - title: NestlePROD
+              const: nestle.onmicrosoft.com
+        namespace:
+          title: Namespace
+          type: string
+          ui:disabled: true
+          ui:widget: hidden
+          oneOf:
+            - const: default
+        environment:
+          title: Environment
+          type: string
+          description: Choose an environment.
+          oneOf:
+            - title: Development
+              const: dv
+            - title: Pre-Production
+              const: pp
+            - title: Production
+              const: pr        
+        segment:
+          title: Project segment
+          type: string
+          description: Maps to the `segment` workflow input.
+          default: marketing
+          enum:
+            - marketing
+            - finance
+            - it
+        location:
+          title: Project location
+          type: string
+          description: Maps to the `location` workflow input.
+          default: europe
+          enum:
+            - europe
+        appName:
+          title: Application Name
+          type: string
+          description: Application name (only alphanumeric with 15 charecters length)
+          pattern: "^[A-Za-z0-9]{1,15}$"
+        request:
+          title: Service-now Request Number
+          type: string
+          description: SNOW RITM Number (for e-g RITM01234567)
+          pattern: "^RITM[0-9]{8}$"
+        foundryresource:
+          title: Foundry Resource Name
+          type: string
+          description: Foundry Resource Name
+        foundryproject:
+          title: Foundry Project Name
+          type: string
+          description: Foundry Project Name
+        umiObjectId:
+          title: UMI Object ID
+          type: string
+          description: UMI Object ID to assign role 
+        umiClientId:
+          title: UMI Client ID
+          type: string
+          description: UMI Client ID to assign it github repo
+      required:
+        - environment
+        - capability
+        - segment
+        - location
+        - appName
+        - foundryresource
+        - foundryproject
+        - umiObjectId
+        - umiClientId
+
+  steps:
+    - action: nestle:backstage-hostname-lookup
+      id: hostname-lookup
+      name: Hostname Lookup
+
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.ref }}
+
+    - id: foundry-hosted-agent-umi-permission
+      action: github:actions:dispatch-with-response
+      name: ADI Foundry Github Action
+      input:
+        repoUrl: github.com?repo=adifoundry-automation&owner=nestle-it
+        workflowId: umi-role-assignment.yml
+        branchOrTagName: main
+        waitForActionCompletion: true
+        timeout: 1200
+        workflowInputs:
+          # branch: 'main'
+          environment: ${{ parameters.environment }}
+          # capability: ${{ parameters.capability }}
+          segment: ${{ parameters.segment }}
+          location: ${{ parameters.location }}
+          appName: ${{ parameters.appName }}
+          foundryResourceName: ${{ parameters.foundryresource }}
+          foundryProjectName: ${{ parameters.foundryproject }}
+          umiObjectID: ${{ parameters.umiObjectId }}
+          snowNumber: ${{ parameters.request }}
+
+    - action: nestle:backstage:variablizer
+      id: variablizer-repo
+      name: Sets Repository Name Variable
+      input:
+        variables:
+          name: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ parameters.appName }}
+          organization: ${{ 'nestle-it' if 'idp.nestle.com' in steps['hostname-lookup'].output.hostname else 'nestle-devtest' }}
+          createdSourceRepo: https://github.com/${{ 'nestle-it' if 'idp.nestle.com' in steps['hostname-lookup'].output.hostname else 'nestle-devtest' }}/${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ parameters.appName }}
+
+    - action: github:environment:configuration:create
+      name: Create or Update Environment Configurations - Common
+      if: ${{ parameters.capability == 'hostedagent' }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer-repo'].output.organization }}&repo=${{ steps['variablizer-repo'].output.name }}
+        environment: ${{ parameters.environment }}
+        environmentVariables:
+          CLIENT_ID: ${{ parameters.umiClientId }}
+          FOUNDRY_PROJECT_ENDPOINT: "https://${{ parameters.foundryresource }}.services.ai.azure.com/api/projects/${{ parameters.foundryproject }}"

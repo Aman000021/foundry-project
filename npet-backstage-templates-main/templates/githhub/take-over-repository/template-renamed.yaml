@@ -1,0 +1,126 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: devtestTakeOverRepoRenamed
+  title: Devtest Take Over Repository Renamed
+  description: |
+    
+    Use this template to recover an orphan GitHub repository that belongs to your Backstage System.
+
+    An orphan repository is a repository that still belongs to your System but no longer has valid admin ownership in GitHub.
+    
+    As the System owner, you can use this flow to "take over" the repository by assigning one or more teams as admin or write access.
+
+    Important rules:
+    - The repository must belong to the selected Backstage System.
+    - The selected GitHub teams must also belong to the same Backstage System.
+    - If no team is available in that System, create one first using
+      [Create GitHub Team](/create/templates/default/devtest-create-github-teams-v2).
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - end-user
+    - github
+
+spec:
+  owner: group:default/aad-devtest-backstage-glbl-test004-marleixo
+  type: github
+
+  parameters:
+    - title: System
+      required: [parentSystem]
+      properties:
+        parentSystem:
+          title: Backstage System
+          description: Select the System you own. The repository and the teams used for takeover must belong to this same System.
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              kind: System
+
+    - title: Repository
+      required: [repositoryResource]
+      properties:
+        repositoryResource:
+          title: Repository
+          description: Select the orphan repository to recover. Only repositories registered under the selected System are shown.
+          type: string
+          ui:field: CatalogRepoPicker
+          ui:options:
+            systemField: parentSystem
+
+    - title: Teams
+      required: [adminTeams]
+      properties:
+        adminTeams:
+          title: Admin Teams
+          type: array
+          description: |
+            Select teams to grant **admin** access to the repository.
+
+            Only teams that belong to the selected Backstage System are available.
+            If no teams are listed, create one first using
+            [Create GitHub Team](/create/templates/default/devtest-create-github-teams-v2).
+          ui:field: CatalogTeamPicker
+          ui:options:
+            systemField: parentSystem
+            permissionFilter: admin
+        accessTeams:
+          title: Write Teams
+          type: array
+          description: |
+            Optionally select teams to grant **write** access to the repository.
+
+            Only teams that belong to the selected Backstage System are available.
+            These teams will not be set as code owners.
+          ui:field: CatalogTeamPicker
+          ui:options:
+            systemField: parentSystem
+            permissionFilter: write
+
+  steps:
+    - id: adminTeamEntity
+      name: Get Admin Team entities
+      if: ${{ parameters.adminTeams | length }}
+      action: catalog:get:entity:data
+      each: ${{ parameters.adminTeams }}
+      input:
+        ref: resource:default/${{ each.value }}
+
+    - id: accessTeamEntity
+      name: Get Write Team entities
+      if: ${{ parameters.accessTeams }}
+      action: catalog:get:entity:data
+      each: ${{ parameters.accessTeams }}
+      input:
+        ref: resource:default/${{ each.value }}
+
+    - id: github-team-admin
+      name: Grant admin teams repository access
+      if: ${{ parameters.adminTeams | length }}
+      action: github:teams:add-team-to-repository
+      each: ${{ parameters.adminTeams }}
+      input:
+        repoUrl: github.com?owner=${{ parameters.repositoryResource | replace('/', '&repo=') }}
+        slug: ${{ steps['adminTeamEntity'].output.annotations[each.key] | parseEntityAnnotations('nestle.com/github-team-slug') }}
+        permission: admin
+
+    - id: github-team-access
+      name: Grant write teams repository access
+      if: ${{ parameters.accessTeams }}
+      action: github:teams:add-team-to-repository
+      each: ${{ parameters.accessTeams }}
+      input:
+        repoUrl: github.com?owner=${{ parameters.repositoryResource | replace('/', '&repo=') }}
+        slug: ${{ steps['accessTeamEntity'].output.annotations[each.key] | parseEntityAnnotations('nestle.com/github-team-slug') }}
+        permission: push
+
+  output:
+    links:
+      - title: GitHub Repository
+        url: https://github.com/${{ parameters.repositoryResource }}
+      - title: GitHub Permissions
+        url: https://github.com/${{ parameters.repositoryResource }}/settings/access

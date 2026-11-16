@@ -1,0 +1,85 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: github-org-invite
+  title: Invite User to GitHub Organization
+  description: |
+    Add a user to a GitHub organization. When inviting former members,
+    their previous role and team memberships will be automatically restored.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - end-user
+    - github
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: github
+
+  parameters:
+    - title: User Information
+      required:
+        - username
+        - organization
+      properties:
+        username:
+          title: GitHub Username
+          type: string
+          description: |
+            The GitHub username to invite to the organization.
+            For Nestle users, this is typically in the format: firstname-lastname_nestle
+          ui:autofocus: true
+        organization:
+          title: Organization
+          type: string
+          description: Target GitHub organization
+          enum:
+            - nestle-it
+            - nestle-devtest
+          enumNames:
+            - Nestle IT (Production)
+            - Nestle DevTest (Development)
+        role:
+          title: Role
+          type: string
+          description: |
+            The role to assign to the user:
+            - **Reinstate**: For former members - restores their previous role and all team memberships
+            - **Member**: Standard organization member
+            - **Admin**: Organization administrator
+          default: reinstate
+          enum:
+            - reinstate
+            - direct_member
+            - admin
+          enumNames:
+            - Reinstate (restore previous role & teams)
+            - Member
+            - Admin
+
+  steps:
+    - id: invite
+      name: Invite User to Organization
+      action: github:org:invite
+      input:
+        repoUrl: github.com?owner=${{ parameters.organization }}
+        username: ${{ parameters.username }}
+        role: ${{ parameters.role }}
+
+  output:
+    text:
+      - title: Invitation Sent
+        content: |
+          ## Invitation Created Successfully
+
+          | Field | Value |
+          |-------|-------|
+          | **User** | `${{ parameters.username }}` |
+          | **Organization** | `${{ parameters.organization }}` |
+          | **Role** | `${{ steps.invite.output.role }}` |
+          | **Invitation ID** | `${{ steps.invite.output.invitationId }}` |
+
+          The user will receive an email invitation to join the organization.
+
+          If this is a **reinstatement**, the user's previous role and team memberships
+          will be restored automatically when they accept the invitation.

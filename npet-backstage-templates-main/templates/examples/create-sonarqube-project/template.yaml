@@ -1,0 +1,83 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: create-sonarqube-project
+  title: Creates a SonarQube Project
+  description: This template triggers a GitHub Action to create a SonarQube Project
+  annotations:
+    nestle.com/template-visibility: private
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: examples
+
+  parameters:
+    - title: Parameters
+      required:
+        - repoUrl
+        - workflowId
+      properties:
+        workflowId:
+          title: Workflow Id
+          type: string
+          default: "create-sonarqube-project.yaml"
+        repoUrl:
+          title: Repository Location
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+            allowedOwners:
+              - nestle-it
+            allowedRepos:
+              - npet-backstage-automation
+
+    - title: GitHub Action Parameters
+      required:
+        # - location
+        - organization
+        - repository
+        - admins
+      properties:
+        # location:
+        #   title: Location
+        #   description: Location of the repository
+        #   type: string
+        #   oneOf:
+        #     - title: GitHub
+        #       const: github
+        #     - title: Azure DevOps
+        #       const: azdo
+        organization:
+          title: Organization Name
+          description: Organization name of the repository
+          type: string
+        repository:
+          title: Repository Name
+          description: Repository name to which sonarqube to be enabled
+          type: string
+        admins:
+          title: Admin Names
+          description: Comma separated list of admin names for sonarqube repository project owner
+          type: string
+
+  steps:
+    - id: pipeline-run
+      action: github:actions:dispatch
+      name: Dispatch Github Action Workflow with inputs
+      input:
+        repoUrl: ${{ parameters.repoUrl }}
+        workflowId: ${{ parameters.workflowId }}
+        branchOrTagName: main
+        waitForActionCompletion: false
+        workflowInputs:
+          # location: ${{ parameters.location }}
+          organization: ${{ parameters.organization }}
+          repository: ${{ parameters.repository }}
+          admins: ${{ parameters.admins }}
+
+  output:
+    text:
+      - title: Pipeline Url
+        content: "Pipeline Url: ${{ steps['pipeline-run'].output.workflowUrl }}"

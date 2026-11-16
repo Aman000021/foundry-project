@@ -1,0 +1,31 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+- id: fetch-resource-cosmosdb
+  action: fetch:template:file
+  name: Template Resource Payload — smanager cosmosdb
+  each: ${{ parameters.environments }}
+  input:
+    url: ../../../.templateable-content/catalog/resource.yaml.njk
+    targetPath: ./${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}-smanager/resources/${{ parameters.scope }}-${{ each.value.name }}-${{ parameters.name }}-smanager-cdb.yaml
+    values:
+      name: ${{ parameters.scope }}-${{ each.value.name }}-${{ parameters.name }}-smanager-cdb
+      namespace: ${{ parameters.name }}-smanager
+      description: cosmosdb account owned by the system ${{ parameters.name }}-smanager (${{ each.value.name }})
+      visibility: private
+      type: cosmosdb-account
+      owner: group:default/${{ ('aad-devtest-backstage-' if steps.getEntitiesConfig.output.entities.owner == 'nestle-devtest' else 'aad-backstage-') + parameters.scope + '-' + parameters.name + '-smanager-members' }}
+      domain: ${{ parameters.domain }}
+      system: system:${{ parameters.name }}-smanager/${{ parameters.name }}-smanager
+      annotations:
+        - key: nestle.com/system-type
+          value: regional
+        - key: br.nestle.com/created-at
+          value: ${{ "" | now }}
+        - key: br.nestle.com/environment
+          value: ${{ each.value.name }}
+        - key: br.nestle.com/domain
+          value: ${{ parameters.name }}
+        - key: br.nestle.com/children
+          value: ${{ parameters.cosmosDB | dump }}
+      tags: []
+      dependsOn: []
+      dependencyOf: []

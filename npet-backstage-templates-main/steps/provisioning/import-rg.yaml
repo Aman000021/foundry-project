@@ -1,0 +1,6 @@
+id: getrg
+name: Import Resource Group
+description: Import an existing resource group into the current project.
+action: azure:resource-group:get
+input:
+  resourceGroupId: ${{ parameters.resourceGroupId }}

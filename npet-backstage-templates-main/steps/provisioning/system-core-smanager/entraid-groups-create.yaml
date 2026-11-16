@@ -1,0 +1,17 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+- id: entraid-groups-create
+  if: ${{ parameters.createEntraidGroups }}
+  name: Create EntraID Groups
+  description: Dispatch the npet-backstage-automation workflow once per EntraID group (techleads and members of both Systems).
+  each: ${{ ['core-techleads', 'core-members', 'smanager-techleads', 'smanager-members'] }}
+  action: github:actions:dispatch-with-response
+  input:
+    repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+    branchOrTagName: main
+    workflowId: entra-id-group.yaml
+    waitForActionCompletion: true
+    timeout: 360
+    workflowInputs:
+      groupNames: ${{ ('AAD-devtest-backstage-' if steps.getEntitiesConfig.output.entities.owner == 'nestle-devtest' else 'AAD-backstage-') + parameters.scope + '-' + parameters.name + '-' + each.value }}
+      groupOwners: ${{ parameters.technicalOwner }}
+      dryRun: false

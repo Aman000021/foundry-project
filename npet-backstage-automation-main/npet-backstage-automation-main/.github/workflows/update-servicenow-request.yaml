@@ -1,0 +1,73 @@
+name: Update ServiceNow Request
+run-name: ServiceNow - [${{ inputs.UUID }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticket:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: choice
+        default: pr
+        options:
+          - pr
+          - dv
+      uribase:
+        required: true
+        type: choice
+        default: https://nestle.service-now.com
+        options:
+          - https://nestle.service-now.com
+          - https://nestledev.service-now.com
+      worknotes:
+        required: false
+        type: string
+      UUID:
+        required: false
+        type: string
+        default: "00000000-0000-0000-0000-000000000000"
+  workflow_call:
+    inputs:
+      ticket:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      uribase:
+        required: true
+        type: string
+      worknotes:
+        required: false
+        type: string
+      UUID:
+        required: false
+        type: string
+        default: "00000000-0000-0000-0000-000000000000"
+
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  update_servicenow_request:
+    environment: ${{ inputs.environment }}
+    runs-on: [self-hosted, Linux, X64]
+    name: Update ServiceNow Request
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Update ServiceNow Request
+        env:
+          SERVICENOW_API_PASSWORD: "${{ secrets.SERVICENOW_API_PASSWORD }}"
+        shell: pwsh
+        run: |
+          pwsh -command ./.scripts/update-servicenow-request.ps1 `
+            -user "${{ vars.SERVICENOW_API_USERNAME }}" `
+            -uribase "${{ inputs.uribase }}" `
+            -ticket "${{ inputs.ticket }}" `
+            -worknotes '"${{ inputs.worknotes }}"' `
+            -resolve

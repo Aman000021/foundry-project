@@ -1,0 +1,16 @@
+title: Catalog Repository Parameters
+required:
+  - repoUrl
+properties:
+  repoUrl:
+    title: Repository Location
+    type: string
+    ui:field: RepoUrlPicker
+    ui:options:
+      allowedHosts:
+        - github.com
+      allowedOwners:
+        - nestle-devtest
+        - nestle-it
+      allowedRepos:
+        - npet-backstage-catalog

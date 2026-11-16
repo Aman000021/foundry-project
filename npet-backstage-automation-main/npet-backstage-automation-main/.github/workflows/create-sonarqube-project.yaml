@@ -1,0 +1,155 @@
+name: Create SonarQube Project
+run-name: SonarQube - [${{ inputs.UUID }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      # location:
+      #   description: "Code hosting platform (github | azdo)"
+      #   type: choice
+      #   options: [github, azdo]
+      #   required: true
+      organization:
+        description: "Organization name of the repository"
+        type: string
+        required: true
+      repository:
+        description: "Repository name to which SonarQube will be enabled"
+        type: string
+        required: true
+      admins:
+        description: "Comma separated list of admin names for SonarQube project owner"
+        type: string
+        required: true
+      UUID:
+        required: false
+        type: string
+        default: "00000000-0000-0000-0000-000000000000"
+
+  workflow_call:
+    inputs:
+      # location:      { type: string, required: true }
+      organization: { type: string, required: true }
+      repository: { type: string, required: true }
+      admins: { type: string, required: true }
+      UUID:
+        {
+          type: string,
+          required: false,
+          default: "00000000-0000-0000-0000-000000000000",
+        }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  SONAR_URL: https://sonar.azure.dsudevops.nestle.biz
+
+jobs:
+  IssueParser:
+    runs-on: ubuntu-latest
+    outputs:
+      sqname: ${{ steps.compute.outputs.sqname }}
+      # location: ${{ steps.compute.outputs.location }}
+    steps:
+      - name: Compute variables
+        id: compute
+        shell: bash
+        run: |
+          # Inputs
+          # location="${{ inputs.location }}"          # github | azdo
+          repo="${{ inputs.repository }}"
+
+          # always prepend azdo- (unless already there)
+          sqname="${repo// /-}"
+          [[ "$sqname" != azdo-* ]] && sqname="azdo-$sqname"
+
+          echo "sqname=$sqname"   >> $GITHUB_OUTPUT
+          # echo "location=$location" >> $GITHUB_OUTPUT
+
+      - name: Print all inputs
+        run: |
+          echo "Inputs:"
+          # echo "  location: ${{ inputs.location }}"
+          echo "  organization: ${{ inputs.organization }}"
+          echo "  repository: ${{ inputs.repository }}"
+          echo "  admins: ${{ inputs.admins }}"
+
+      - name: print sqname
+        run: echo "sqname => ${{ steps.compute.outputs.sqname }}"
+
+  GitHubConfig:
+    needs: IssueParser
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_CONTEXT: ${{ toJson(github) }}
+    steps:
+      - name: Create SonarQube Project
+        id: sonarqube
+        uses: nestle-it/gha-sonarqube-automation@main
+        with:
+          SonarQubeUrl: ${{ env.SONAR_URL }}
+          SonarQubeToken: ${{ secrets.SONAR_TOKEN }}
+          AzureDevOpsPat: ${{ secrets.AZDO_TOKEN }}
+          SonarQubeProject: ${{ needs.IssueParser.outputs.sqname }}
+          RepositoryName: ${{ inputs.organization }}/${{ inputs.repository }}
+          Users: ${{ inputs.admins }}
+          SCMType: "github"
+
+      - name: Create SonarQube Analysis Token
+        id: sonarqube-token
+        run: |
+          # delete the token if it exists with the same name
+          curl -u ${{ secrets.SONAR_TOKEN }}: \
+               -X POST ${{ env.SONAR_URL }}/api/user_tokens/revoke \
+               -F name=${{ needs.IssueParser.outputs.sqname }}
+
+          sonartoken=$(curl -L -u ${{ secrets.SONAR_TOKEN }}: \
+               -X POST ${{ env.SONAR_URL }}/api/user_tokens/generate \
+               -F name=${{ needs.IssueParser.outputs.sqname }} \
+               -F projectKey=${{ needs.IssueParser.outputs.sqname }} \
+               -F type=PROJECT_ANALYSIS_TOKEN | jq -r '.token')
+
+          echo "sonartoken=$sonartoken" >> $GITHUB_OUTPUT
+
+      - name: print sonartoken
+        run: echo ${{ steps.sonarqube-token.outputs.sonartoken }}
+
+      - name: Get GH App Token
+        id: token-getter
+        uses: peter-murray/workflow-application-token-action@v3
+        with:
+          application_id: ${{ vars.GHE_AUTOMATION_APP_ID }}
+          application_private_key: ${{ secrets.GHE_AUTOMATION_PRIVATE_KEY }}
+          organization: ${{ inputs.organization }}
+
+      - name: Configure SonarQube Run secret in GitHub repo
+        env:
+          GITHUB_TOKEN: ${{ steps.token-getter.outputs.token }}
+        run: |
+          gh secret set SONAR_TOKEN \
+            -R ${{ inputs.organization }}/${{ inputs.repository }} \
+            --body ${{ steps.sonarqube-token.outputs.sonartoken }}
+
+  # ─────────────── Azure DevOps  ───────────────
+  # AzDOConfig:
+  #   needs: IssueParser
+  #   if: needs.IssueParser.outputs.location == 'azdo'
+  #   runs-on: ubuntu-latest
+  #   env:
+  #     GITHUB_CONTEXT: ${{ toJson(github) }}
+  #   steps:
+  #     - name: Create SonarQube Project
+  #       id: sonarqube
+  #       uses: nestle-it/gha-sonarqube-automation@main
+  #       with:
+  #         SonarQubeUrl:     ${{ env.SONAR_URL }}
+  #         SonarQubeToken:   ${{ secrets.SONAR_TOKEN }}
+  #         AzureDevOpsPat:   ${{ secrets.AZDO_TOKEN }}
+  #         AzDOOrganization: ${{ inputs.organization }}
+  #         AzDOProjectName:  ${{ inputs.repository }}
+  #         SonarQubeProject: ${{ needs.IssueParser.outputs.sqname }}
+  #         RepositoryName:   ${{ inputs.repository }}
+  #         Users:            ${{ inputs.admins }}
+  #         SCMType:          "azdo"

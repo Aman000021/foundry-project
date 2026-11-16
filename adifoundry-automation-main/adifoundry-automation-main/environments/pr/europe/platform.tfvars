@@ -1,0 +1,8 @@
+environment_name                = "pr"
+resource_group_name             = "glbl-pr-adifoundryhub-adi-euwe-rgp"
+# vnet_name = "emna-np-network-adi-euwe-001-vnt"
+shared_subnet_name              = "emna-pr-g-adi-euwe-002-snt"
+storage_account       = "glblpradifoundrysta"
+key_name                        = "glblprplatform644key"
+key_pep                         = "glbl-pr-platform.key-pep"
+log_analytics_name = "glbl-pr-platformhub-log"

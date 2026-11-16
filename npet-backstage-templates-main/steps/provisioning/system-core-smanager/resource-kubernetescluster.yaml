@@ -1,0 +1,48 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+#
+# The AKS cluster only exists on the core System — the smanager workloads are
+# deployed to it. `br.nestle.com/alias` carries the cluster alias both Systems
+# are annotated with (`br.nestle.com/cluster`), and `br.nestle.com/subnet-iD`
+# takes the dedicated `fd.aks` subnet, not the general subnet of the base Resource.
+- id: fetch-resource-kubernetescluster
+  action: fetch:template:file
+  name: Template Resource Payload — core kubernetescluster
+  each: ${{ parameters.environments }}
+  input:
+    url: ../../../.templateable-content/catalog/resource.yaml.njk
+    targetPath: ./${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}-core/resources/${{ parameters.scope }}-${{ each.value.name }}-${{ parameters.name }}-core-aks.yaml
+    values:
+      name: ${{ parameters.scope }}-${{ each.value.name }}-${{ parameters.name }}-core-aks
+      namespace: ${{ parameters.name }}-core
+      description: kubernetes cluster owned by the system ${{ parameters.name }}-core (${{ each.value.name }})
+      visibility: private
+      type: kubernetes-cluster
+      owner: group:default/${{ ('aad-devtest-backstage-' if steps.getEntitiesConfig.output.entities.owner == 'nestle-devtest' else 'aad-backstage-') + parameters.scope + '-' + parameters.name + '-core-members' }}
+      domain: ${{ parameters.domain }}
+      system: system:${{ parameters.name }}-core/${{ parameters.name }}-core
+      annotations:
+        - key: nestle.com/system-type
+          value: regional
+        - key: br.nestle.com/created-at
+          value: ${{ "" | now }}
+        - key: br.nestle.com/environment
+          value: ${{ each.value.name }}
+        - key: br.nestle.com/domain
+          value: ${{ parameters.name }}
+        - key: br.nestle.com/alias
+          value: ${{ parameters.name }}-core
+        - key: br.nestle.com/kubernetes-version
+          value: ${{ parameters.aks.kubernetesVersion }}
+        - key: br.nestle.com/sku-tier
+          value: ${{ parameters.aks.skuTier }}
+        - key: br.nestle.com/default-node-pool
+          value: '{"vmSize":"${{ parameters.aks.nodePool.vmSize }}","osDiskSizeGb":${{ parameters.aks.nodePool.osDiskSizeGb }},"osDiskType":"${{ parameters.aks.nodePool.osDiskType }}","maxCount":${{ parameters.aks.nodePool.maxCount }},"minCount":${{ parameters.aks.nodePool.minCount }},"nodePoolVersion":"${{ parameters.aks.kubernetesVersion }}"}'
+        - key: br.nestle.com/istio
+          value: '{"enabled":${{ parameters.aks.istio.enabled }},"revision":"${{ parameters.aks.istio.revision }}","externalIngressGatewayEnabled":${{ parameters.aks.istio.externalIngressGatewayEnabled }},"internalIngressGatewayEnabled":${{ parameters.aks.istio.internalIngressGatewayEnabled }}}'
+        - key: br.nestle.com/admins
+          value: ${{ parameters.aks.admins | dump }}
+        - key: br.nestle.com/subnet-iD
+          value: ${{ each.value.aksSubnetId }}
+      tags: []
+      dependsOn: []
+      dependencyOf: []

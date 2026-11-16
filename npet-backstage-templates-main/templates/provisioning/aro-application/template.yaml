@@ -1,0 +1,781 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: provisioning-aro-application
+  title: Create ARO Application
+  description: |
+    Deploys a new application to Azure Red Hat OpenShift (ARO) or adds an environment to an existing application.
+
+    This template provisions:
+    - Dedicated namespace per environment
+    - GitHub repository with CI/CD workflow
+    - Quay container registry and robot account
+    - ArgoCD application for automated deployments
+    - EntraID security groups for namespace access
+
+    **Access Control**
+    You will be set as the namespace owner and granted access to manage deployments through ArgoCD. This is independent of the System owner in Backstage.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - end-user
+    - aro
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: cloud-template
+
+  parameters:
+    - title: Parameters
+      ui:order:
+        - addEnvironmentToExistingApp
+        - existingApplicationRef
+        - ref
+        - appName
+        - environment
+        - environmentToAdd
+        - namespaceOwnerEmail
+        - overrideInfraResources
+        - resources
+        - aroCluster
+        - argoRepoUrl
+        - defaultResources
+        - keyVaultUri
+      properties:
+        addEnvironmentToExistingApp:
+          title: Add environment to an existing ARO application?
+          type: boolean
+          default: false
+        overrideInfraResources:
+          title: Override Infrastructure Resources?
+          description: |
+            **Optional**: If selected, will be able to override the default Infrastructure Resources assigned to the ARO Namespace.
+          type: boolean
+          default: false
+        aroCluster:
+          title: ARO Cluster
+          type: string
+          default: nams-pr-dccaroglobalhub-01-usea-aro
+          ui:disabled: true
+          ui:widget: hidden
+        keyVaultUri:
+          ui:widget: hidden
+          title: Key Vault URI
+          type: string
+          description: Azure Key Vault URI where secrets will be stored
+          default: "https://namsprdccaroglobalhubkey.vault.azure.net/"
+      dependencies:
+        addEnvironmentToExistingApp:
+          allOf:
+            - if:
+                properties:
+                  addEnvironmentToExistingApp:
+                    const: false
+              then:
+                required:
+                  - ref
+                  - appName
+                  - environment
+                properties:
+                  ref:
+                    title: Parent System
+                    description: System to associate this ResourceGroup to.
+                    type: string
+                    ui:field: OwnedEntityPicker
+                    ui:options:
+                      allowArbitraryValues: false
+                      catalogFilter:
+                        - kind: System
+                  appName:
+                    title: Application Name
+                    type: string
+                    pattern: "^([a-zA-Z][a-zA-Z0-9]*)(-[a-zA-Z0-9]+)*$"
+                  environment:
+                    title: Environment
+                    type: string
+                    enum:
+                      - dv
+                      - tst
+                      - pp
+                      - pr
+                  argoRepoUrl:
+                    title: Repository Location
+                    type: string
+                    ui:field: RepoUrlPicker
+                    ui:widget: hidden
+                    ui:options:
+                      allowedHosts:
+                        - github.com
+                      allowedOwners:
+                        - nestle-it
+                      allowedRepos:
+                        - glbl-pr-dccacmglobalhub-01
+            - if:
+                properties:
+                  addEnvironmentToExistingApp:
+                    const: true
+              then:
+                required:
+                  - existingApplicationRef
+                  - environmentToAdd
+                  - namespaceOwnerEmail
+                properties:
+                  existingApplicationRef:
+                    title: Existing ARO Application
+                    description: Select the existing ARO application to extend.
+                    type: string
+                    ui:field: EntityPicker
+                    ui:options:
+                      catalogFilter:
+                        - kind: Component
+                          metadata.annotations.nestle.com/parent-process: "aro"
+                  environmentToAdd:
+                    title: Environment to Add
+                    type: string
+                    enum:
+                      - dv
+                      - tst
+                      - pp
+                      - pr
+                  namespaceOwnerEmail:
+                    title: Namespace Owner Email
+                    description: Email of the person who will own this environment's namespace (defaults to you)
+                    type: string
+                    ui:help: "This person will be added as the owner of the EntraID group for this environment's namespace"
+        overrideInfraResources:
+          allOf:
+            - if:
+                properties:
+                  overrideInfraResources:
+                    const: true
+              then:
+                required:
+                  - resources
+                properties:
+                  resources:
+                    title: Resources
+                    type: object
+                    properties:
+                      containerCPULimit:
+                        title: Container CPU Limit
+                        type: string
+                        oneOf:
+                          - const: "200m"
+                            title: "200m"
+                          - const: "500m"
+                            title: "500m"
+                          - const: "1"
+                            title: "1 Core"
+                          - const: "3"
+                            title: "3 Cores"
+                      containerMemoryLimit:
+                        title: Container Memory Limit
+                        type: string
+                        oneOf:
+                          - const: "512Mi"
+                            title: "512Mi"
+                          - const: "1Gi"
+                            title: "1Gi"
+                          - const: "2Gi"
+                            title: "2Gi "
+                          - const: "6Gi"
+                            title: "6Gi"
+                      containerCPURequest:
+                        title: Container CPU Request
+                        type: string
+                        oneOf:
+                          - const: "100m"
+                            title: "100m"
+                          - const: "200m"
+                            title: "200m"
+                          - const: "500m"
+                            title: "500m"
+                          - const: "1"
+                            title: "1 Core"
+                      containerMemoryRequest:
+                        title: Container Memory Request
+                        type: string
+                        oneOf:
+                          - const: "256Mi"
+                            title: "256Mi"
+                          - const: "400Mi"
+                            title: "400Mi"
+                          - const: "1Gi"
+                            title: "1Gi"
+                          - const: "2Gi"
+                            title: "2Gi"
+            - if:
+                properties:
+                  overrideInfraResources:
+                    const: false
+              then:
+                required:
+                  - defaultResources
+                properties:
+                  defaultResources:
+                    title: Resources
+                    type: object
+                    ui:disabled: true
+                    ui:widget: hidden
+                    properties:
+                      containerCPULimit:
+                        title: Container CPU Limit
+                        type: string
+                        default: "1"
+                      containerMemoryLimit:
+                        title: Container Memory Limit
+                        type: string
+                        default: 4Gi
+                      containerCPURequest:
+                        title: Container CPU Request
+                        type: string
+                        default: 50m
+                      containerMemoryRequest:
+                        title: Container Memory Request
+                        type: string
+                        default: 256Mi
+      errorMessage:
+        properties:
+          appName: "Alphanumeric tokens (first starts with letter) delimited by -"
+
+  steps:
+    - action: catalog:get:entity:data
+      id: existing-application-entity
+      if: ${{ parameters.addEnvironmentToExistingApp }}
+      name: Get Existing ARO Application
+      input:
+        ref: ${{ parameters.existingApplicationRef }}
+
+    - action: nestle:error
+      id: fail-if-environment-exists
+      if: ${{ parameters.environmentToAdd in steps['existing-application-entity'].output.annotations | parseEntityAnnotations('nestle.com/environments') }}
+      name: Fail If Environment Already Exists
+      input:
+        error: |
+          Error: Environment Already Exists! Please select a new environment and try again.
+
+    - action: nestle:backstage:variablizer
+      id: environment-context
+      name: Build Environment Context
+      input:
+        variables:
+          selectedEnvironment: ${{ parameters.environmentToAdd if parameters.addEnvironmentToExistingApp else parameters.environment }}
+          existingEnvironmentsJson: ${{ steps['existing-application-entity'].output.annotations | parseEntityAnnotations('nestle.com/environments') if parameters.addEnvironmentToExistingApp else '[]' }}
+          parentSystem: ${{ steps['existing-application-entity'].output.system if parameters.addEnvironmentToExistingApp else parameters.ref }}
+          appName: ${{ steps['existing-application-entity'].output.annotations | parseEntityAnnotations('nestle.com/application-name') if parameters.addEnvironmentToExistingApp else parameters.appName }}
+          repoOwner: ${{ steps['existing-application-entity'].output.annotations | parseEntityAnnotations('nestle.com/argo-repo-owner') if parameters.addEnvironmentToExistingApp else '' }}
+          repoName: ${{ steps['existing-application-entity'].output.annotations | parseEntityAnnotations('nestle.com/argo-repo-name') if parameters.addEnvironmentToExistingApp else '' }}
+          repoUrl: ${{ steps['existing-application-entity'].output.annotations | parseEntityAnnotations('nestle.com/argo-repo-url') if parameters.addEnvironmentToExistingApp else '' }}
+          quayRobotName: ${{ steps['existing-application-entity'].output.annotations | parseEntityAnnotations('nestle.com/quay-robot-name') if parameters.addEnvironmentToExistingApp else '' }}
+
+    # Build combined environment list manually (existing + new)
+    - action: nestle:backstage:variablizer
+      id: build-environment-list
+      name: Build Complete Environment List
+      input:
+        variables:
+          existingEnvs: ${{ steps['environment-context'].output.existingEnvironmentsJson }}
+          newEnv: ${{ steps['environment-context'].output.selectedEnvironment }}
+          # Create comma-separated list for iteration
+          allEnvironments: >-
+            {%- if parameters.addEnvironmentToExistingApp -%}
+            ${{ steps['environment-context'].output.existingEnvironmentsJson | replace('[', '') | replace(']', '') | replace('"', '') }},${{ steps['environment-context'].output.selectedEnvironment }}
+            {%- else -%}
+            ${{ steps['environment-context'].output.selectedEnvironment }}
+            {%- endif -%}
+
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ steps['environment-context'].output.parentSystem }}
+
+    - action: nestle:backstage-hostname-lookup
+      id: hostname-lookup
+      name: Hostname Lookup
+
+    - action: nestle:backstage:variablizer
+      id: variablizer
+      name: Sets Variables
+      input:
+        variables:
+          name: ${{ steps['environment-context'].output.repoName or (steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name')) ~ '-' ~ (steps['system-entity'].output.annotations | parseEntityAnnotations('context')) ~ '-' ~ steps['environment-context'].output.appName }}
+          createdSourceRepo: ${{ steps['environment-context'].output.repoUrl or ('https://github.com/' ~ ('nestle-it' if 'idp.nestle.com' in steps['hostname-lookup'].output.hostname else 'nestle-devtest') ~ '/' ~ (steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name')) ~ '-' ~ (steps['system-entity'].output.annotations | parseEntityAnnotations('context')) ~ '-' ~ steps['environment-context'].output.appName) }}
+          organization: ${{ steps['environment-context'].output.repoOwner or ('nestle-it' if 'idp.nestle.com' in steps['hostname-lookup'].output.hostname else 'nestle-devtest') }}
+
+    - action: nestle:backstage:variablizer
+      id: variablizer-env
+      name: Sets Variables for Selected Environment Only
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        variables:
+          name: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ each.value }}-${{ steps['environment-context'].output.appName }}
+          quayRepositoryName: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}/${{ each.value }}/${{ steps['environment-context'].output.appName }}
+          namespaceOwnerGroup: AAD-SG-backstage-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ each.value }}-${{ steps['environment-context'].output.appName }}-ns-owner
+
+    # Prepare all environment-specific variables (for ALL environments, not just new one)
+    - action: nestle:backstage:variablizer
+      id: variablizer-env-all
+      name: Build Variables for All Environments
+      each: ${{ steps['build-environment-list'].output.allEnvironments.split(',') }}
+      input:
+        variables:
+          name: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ each.value }}-${{ steps['environment-context'].output.appName }}
+          quayRepositoryName: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}/${{ each.value }}/${{ steps['environment-context'].output.appName }}
+          quayRepositoryUrl: quay.apps.ektnlbrn.westeurope.aroapp.io/idp_devops/${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}/${{ each.value }}/${{ steps['environment-context'].output.appName }}
+          namespaceOwnerGroup: AAD-SG-backstage-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ each.value }}-${{ steps['environment-context'].output.appName }}-ns-owner
+
+    # Regenerate workflow file with ALL environments (both new and adding to existing)
+    - id: fetch-workflow-file
+      action: fetch:template:file
+      name: Regenerate Workflow File with All Environments
+      input:
+        url: https://github.com/nestle-it/npet-backstage-repository-templates/tree/main/npet-aro-template/.github/workflows/build.yaml.njk
+        targetPath: ./app-content/.github/workflows/build.yaml
+        values:
+          name: ${{ steps['variablizer'].output.name }}
+          environments: ${{ steps['build-environment-list'].output.allEnvironments.split(',') }}
+          repositories: ${{ steps['variablizer-env-all'].output.quayRepositoryUrl }}
+
+    - id: namespace-owner-group-create-entraid-group
+      action: github:actions:dispatch-with-response
+      name: Create Namespace Owner Groups and Assign to Enterprise App
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+        branchOrTagName: main
+        workflowId: entra-id-group-with-enterprise-app.yaml
+        waitForActionCompletion: true
+        timeout: 600
+        workflowInputs:
+          groupNames: ${{ steps['variablizer-env'].output.namespaceOwnerGroup[each.key] }}
+          groupOwners: "${{ parameters.namespaceOwnerEmail if parameters.addEnvironmentToExistingApp else user.entity.spec.profile.email }}"
+
+    - id: quay-create-robot
+      action: redhat-quay:create-robot
+      name: Create Redhat Quay Robot
+      input:
+        name: ${{ steps['variablizer'].output.name }}
+
+    - id: quay-create-repo
+      action: redhat-quay:create-repo
+      name: Create Redhat Quay Repository
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        name: ${{ steps['variablizer-env'].output.quayRepositoryName[each.key] }}
+
+    - id: quay-create-robot-permission
+      action: redhat-quay:create-robot-permission
+      name: Create Redhat Quay Robot Repository Permission
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        repository: ${{ steps['variablizer-env'].output.quayRepositoryName[each.key] }}
+        robot: ${{ steps['quay-create-robot'].output.name }}
+
+    - id: store-quay-token-keyvault
+      action: azure-portal:create-keyvault-secret
+      name: Store Quay Robot Token in Key Vault
+      input:
+        keyVaultUri: ${{ parameters.keyVaultUri }}
+        secretName: quay-robot-token-${{ steps['variablizer'].output.name }}
+        secretValue: |
+          {"auths":{"quay.apps.ektnlbrn.westeurope.aroapp.io":{"username":"${{ steps['quay-create-robot'].output.name }}","password":"${{ steps['quay-create-robot'].output.token }}","email":""}}}
+
+    - action: nestle:backstage:variablizer
+      id: variablizer-catalog-info
+      name: Prepare Catalog Info Values
+      input:
+        variables:
+          projectSlug: ${{ steps['variablizer'].output.organization }}/${{ steps['variablizer'].output.name }}
+          githubUrl: ${{ steps['variablizer'].output.createdSourceRepo.split('.git')[0] if '.git' in steps['variablizer'].output.createdSourceRepo else steps['variablizer'].output.createdSourceRepo }}
+          quayRobotName: ${{ steps['quay-create-robot'].output.name }}
+
+    # For new apps: fetch entire template
+    - id: fetch-template
+      action: fetch:template
+      name: Fetch Template Repository
+      if: ${{ parameters.addEnvironmentToExistingApp == false }}
+      input:
+        url: https://github.com/nestle-it/npet-backstage-repository-templates/tree/main/npet-aro-template
+        targetPath: app-content
+        values:
+          name: ${{ steps['variablizer'].output.name }}
+          environments: ${{ steps['build-environment-list'].output.allEnvironments.split(',') }}
+          repositories: ${{ steps['variablizer-env-all'].output.quayRepositoryUrl }}
+        templateFileExtension: true
+        replace: true
+
+    # TechDocs Configuration
+    - action: fetch:template:file
+      id: fetch-techdocs-mkdocs
+      name: Fetch TechDocs MkDocs Config
+      input:
+        url: ./content/mkdocs.yml.njk
+        targetPath: app-content/.backstage/mkdocs.yml
+        values:
+          name: ${{ steps['variablizer'].output.name }}
+        replace: true
+
+    - action: fetch:template:file
+      id: fetch-techdocs-docs-index
+      name: Fetch TechDocs Documentation
+      input:
+        url: ./content/docs-index.md.njk
+        targetPath: app-content/docs/index.md
+        values:
+          name: ${{ steps['variablizer'].output.name }}
+        replace: true
+
+    - action: fetch:template:file
+      id: fetch-techdocs-workflow
+      name: Fetch TechDocs Workflow
+      input:
+        url: ./content/publish-techdocs.yml.njk
+        targetPath: app-content/.github/workflows/publish-techdocs.yml
+        values:
+          name: ${{ steps['variablizer'].output.name }}
+        replace: true
+
+    - id: fetch-template-environment-helm-values
+      action: fetch:template:file
+      name: Fetch Template - Env Helm Values
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        url: https://github.com/nestle-it/npet-backstage-repository-templates/tree/main/npet-aro-template/helm/env/values.yaml.njk
+        targetPath: app-content/helm/env/values.${{ each.value }}.yaml
+        values:
+          environment: ${{ each.value }}
+          repository: ${{ steps['variablizer-env'].output.quayRepositoryName[each.key] }}
+        replace: true
+
+    - id: fetch-template-environment-file
+      action: fetch:template:file
+      name: Fetch Template - Catalog Info
+      input:
+        url: ./content/catalog-info.yaml.njk
+        targetPath: app-content/.backstage/catalog-info.yaml
+        values:
+          name: ${{ steps['variablizer-env'].output.name[0] }}
+          owner: ${{ steps['system-entity'].output.owner }}
+          system: ${{ steps['environment-context'].output.parentSystem }}
+          quayRepositorySlug: idp_devops/${{ steps['variablizer-env'].output.quayRepositoryName[0] }}
+          quayRepositoryUrl: https://quay.apps.ektnlbrn.westeurope.aroapp.io/repository/idp_devops/${{ steps['variablizer-env'].output.quayRepositoryName[0] }}
+          applicationName: ${{ steps['environment-context'].output.appName }}
+          environments: ${{ steps['build-environment-list'].output.allEnvironments.split(',') }}
+          argoRepoOwner: ${{ steps['variablizer'].output.organization }}
+          argoRepoName: ${{ steps['variablizer'].output.name }}
+          argoRepoUrl: ${{ steps['variablizer'].output.createdSourceRepo }}
+          quayRobotName: ${{ steps['variablizer-catalog-info'].output.quayRobotName }}
+          projectSlug: ${{ steps['variablizer-catalog-info'].output.projectSlug }}
+          githubUrl: ${{ steps['variablizer-catalog-info'].output.githubUrl }}
+        replace: true
+
+    - action: fs:delete
+      id: deleteFiles
+      name: Cleanup Files
+      input:
+        files:
+          - app-content/catalog-info.yaml
+          - app-content/helm/env/values.yaml
+
+    - id: github-team-create
+      action: github:teams:create
+      name: Create GitHub Team(s)
+      each:
+        [
+          "${{ steps['variablizer'].output.name }}-admin",
+          "${{ steps['variablizer'].output.name }}-write",
+        ]
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.name }}
+        maintainers:
+          [
+            "${{ steps['system-entity'].output.annotations | parseEntityAnnotations('technical-owner') }}",
+          ]
+        teamName: ${{ each.value }}
+
+    - id: github-repo-get
+      action: github:repo:get
+      name: Get GitHub Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.name }}
+
+    - id: github-repository-create
+      action: publish:github
+      name: Create GitHub Repository
+      if: ${{ steps['github-repo-get'].output.exists == false }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.name }}
+        sourcePath: app-content
+        defaultBranch: main
+        description: Templated Argo Application Repository created by Backstage.
+        repoVisibility: internal
+        customProperties:
+          cost-center-id: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('cost-center') }}
+          apm-id: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('apm-id') }}
+
+    - id: github-repository-update
+      action: publish:github:pull-request
+      name: Update GitHub Repository
+      if: ${{ steps['github-repo-get'].output.exists }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.name }}
+        sourcePath: app-content
+        branchName: update-${{ steps['variablizer'].output.name }}
+        title: "Update from Backstage - ${{ steps['variablizer'].output.name }}"
+        description: "Backstage template updates of ${{ steps['variablizer'].output.name }}."
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+    - id: github-team-associate
+      action: github:teams:add-team-to-repository
+      name: Add GitHub Team(s) to Repository
+      each:
+        [
+          "${{ steps['variablizer'].output.name }}-admin",
+          "${{ steps['variablizer'].output.name }}-write",
+        ]
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.name }}
+        slug: ${{ steps['github-team-create'].output.slug[each.key] }}
+
+    - id: register-catalog-entities
+      name: Register Catalog Entity
+      action: catalog:register
+      if: ${{ steps['github-repo-get'].output.exists == false }}
+      input:
+        repoContentsUrl: ${{ steps['github-repository-create'].output.repoContentsUrl }}
+        catalogInfoPath: "/.backstage/catalog-info.yaml"
+        optional: true
+
+    - action: github:environment:create
+      name: Create Environment
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.name }}
+        name: ${{ each.value }}
+
+    - action: github:environment:configuration:create
+      name: Create or Update Environment Configurations
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.name }}
+        environment: ${{ each.value }}
+        environmentVariables:
+          REDHAT_QUAY_HOST: quay.apps.ektnlbrn.westeurope.aroapp.io
+          REDHAT_QUAY_ROBOT_NAME: ${{ steps['quay-create-robot'].output.name }}
+        secrets:
+          REDHAT_QUAY_ROBOT_TOKEN: ${{ steps['quay-create-robot'].output.token }}
+
+    - id: fetch-app-project
+      action: fetch:template:file
+      name: Template ArgoCD AppProject
+      input:
+        url: ./content/app-project.yaml.njk
+        targetPath: >-
+          ./argo-content/policies/cluster/${{ parameters.aroCluster }}/namespace/${{ steps['variablizer'].output.name }}/resource/app-project.yaml
+        values:
+          name: ${{ steps['variablizer'].output.name }}
+          namespaces: ${{ steps['variablizer-env-all'].output.name }}
+          namespaceOwnerGroups: ${{ steps['variablizer-env-all'].output.namespaceOwnerGroup }}
+          environments: ${{ steps['build-environment-list'].output.allEnvironments.split(',') }}
+          sourceRepo: ${{ steps['variablizer'].output.createdSourceRepo }}
+
+    - id: fetch-namespace
+      action: fetch:template:file
+      name: Template Namespace and Dependencies
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        url: ./content/namespace.yaml.njk
+        targetPath: >-
+          ./argo-content/policies/cluster/${{ parameters.aroCluster }}/namespace/${{ steps['variablizer'].output.name }}/resource/${{ each.value }}/namespace.yaml
+        values:
+          name: ${{ steps['variablizer-env'].output.name[each.key] }}
+          environment: ${{ each.value }}
+          namespaceOwnerGroup: ${{ steps['variablizer-env'].output.namespaceOwnerGroup[each.key] }}
+          costPlan: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('cost-plan') }}
+          costCenter: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('cost-center') }}
+          technicalOwner: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('technical-owner') }}
+          financialOwner: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('financial-owner') }}
+          functionalOwner: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('functional-owner') }}
+          billingContact: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('billing-contact') }}
+          department: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('department') }}
+          apmId: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('apm-id') }}
+          market: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('market') }}
+          solutionName: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}
+          context: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}
+          dataClassification: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('data-classification') }}
+          network: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('network') }}
+          scope: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('scope') }}
+          resources: ${{ parameters.resources if parameters.overrideInfraResources else parameters.defaultResources }}
+
+    - id: fetch-application
+      action: fetch:template:file
+      name: Template ArgoCD Application
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        url: ./content/application.yaml.njk
+        targetPath: >-
+          ./argo-content/policies/cluster/${{ parameters.aroCluster }}/namespace/${{ steps['variablizer'].output.name }}/resource/${{ each.value }}/application.yaml
+        values:
+          environment: ${{ each.value }}
+          name: ${{ steps['variablizer-env'].output.name[each.key] }}
+          projectName: ${{ steps['variablizer'].output.name }}
+          sourceRepo: ${{ steps['variablizer'].output.createdSourceRepo }}
+
+    - id: fetch-groupsync
+      action: fetch:template:file
+      name: Template GroupSync
+      input:
+        url: ./content/group-sync.yaml.njk
+        targetPath: >-
+          ./argo-content/policies/cluster/${{ parameters.aroCluster }}/namespace/${{ steps['variablizer'].output.name }}/resource/group-sync.yaml
+        values:
+          name: ${{ steps['variablizer'].output.name }}
+          namespaceOwnerGroups: ${{ steps['variablizer-env-all'].output.namespaceOwnerGroup }}
+
+    - id: fetch-repository
+      action: fetch:template:file
+      name: Template ArgoCD Repository
+      if: ${{ parameters.addEnvironmentToExistingApp == false }}
+      input:
+        url: ./content/repository.yaml.njk
+        targetPath: >-
+          ./argo-content/policies/cluster/${{ parameters.aroCluster }}/namespace/${{ steps['variablizer'].output.name }}/resource/repository.yaml
+        values:
+          name: ${{ steps['variablizer'].output.name }}
+          sourceRepo: ${{ steps['variablizer'].output.createdSourceRepo }}
+
+    - id: fetch-imagepullsecret
+      action: fetch:template:file
+      name: Template Image Pull Secret
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        url: ./content/image-pull-secret.yaml.njk
+        targetPath: >-
+          ./argo-content/policies/cluster/${{ parameters.aroCluster }}/namespace/${{ steps['variablizer'].output.name }}/resource/${{ each.value }}/image-pull-secret.yaml
+        values:
+          name: ${{ steps['variablizer-env'].output.name[each.key] }}
+          namespace: ${{ steps['variablizer-env'].output.name[each.key] }}
+          keyVaultSecretName: quay-robot-token-${{ steps['variablizer'].output.name }}
+
+    - id: fetch-kustomization
+      action: fetch:template:file
+      name: Template Kustomization
+      input:
+        url: ./content/kustomization.yaml.njk
+        targetPath: >-
+          ./argo-content/policies/cluster/${{ parameters.aroCluster }}/namespace/${{ steps['variablizer'].output.name }}/kustomization.yaml
+        values:
+          environments: ${{ steps['build-environment-list'].output.allEnvironments.split(',') }}
+
+    - id: publish-resource
+      name: ARO GitOps Repository PR
+      action: publish:github:pull-request
+      input:
+        repoUrl: ${{ parameters.argoRepoUrl }}
+        sourcePath: argo-content
+        branchName: create-${{ steps['variablizer'].output.name }}
+        title: "Application - ${{ steps['variablizer'].output.name }}"
+        description: "Application creation of ${{ steps['variablizer'].output.name }} from Backstage."
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+    # Generate namespace resource entities for catalog repo (ALL environments)
+    - id: fetch-namespace-resources
+      action: fetch:template:file
+      name: Generate Namespace Resource Entities
+      each: ${{ steps['build-environment-list'].output.allEnvironments.split(',') }}
+      input:
+        url: ./content/namespace-resource.yaml.njk
+        targetPath: >-
+          ./catalog-content/${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/components/${{ steps['variablizer-env-all'].output.name[each.key] }}.yaml
+        values:
+          name: ${{ steps['variablizer-env-all'].output.name[each.key] }}
+          environment: ${{ each.value }}
+          namespaceOwnerGroup: ${{ steps['variablizer-env-all'].output.namespaceOwnerGroup[each.key] }}
+          quayRepositorySlug: idp_devops/${{ steps['variablizer-env-all'].output.quayRepositoryName[each.key] }}
+          quayRepositoryUrl: https://quay.apps.ektnlbrn.westeurope.aroapp.io/repository/idp_devops/${{ steps['variablizer-env-all'].output.quayRepositoryName[each.key] }}
+          aroCluster: ${{ parameters.aroCluster }}
+          owner: ${{ steps['system-entity'].output.owner }}
+          system: ${{ steps['environment-context'].output.parentSystem }}
+          componentName: ${{ steps['variablizer'].output.name }}
+
+    # Publish namespace resources to catalog repo
+    - id: publish-namespace-resources
+      name: Create PR in Catalog Repo for Namespace Resources
+      action: publish:github:pull-request
+      input:
+        sourcePath: ./catalog-content/${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/components
+        targetPath: ${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/components
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-catalog
+        branchName: aro-namespace-${{ steps['variablizer'].output.name }}
+        title: "ARO Namespaces - ${{ steps['variablizer'].output.name }}"
+        description: "ARO namespace resources for ${{ steps['variablizer'].output.name }} with environments: ${{ steps['build-environment-list'].output.allEnvironments }}"
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+    # Register namespace resources in catalog (only for selected environment when adding)
+    - id: register-namespace-resource
+      name: Register Namespace Resource in Catalog
+      action: catalog:register
+      each:
+        - ${{ steps['environment-context'].output.selectedEnvironment }}
+      input:
+        repoContentsUrl: https://github.com/nestle-it/npet-backstage-catalog/blob/main
+        catalogInfoPath: /${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/components/${{ steps['variablizer-env'].output.name[each.key] }}.yaml
+        optional: true
+
+  output:
+    links:
+      - title: Templated Helm Repository
+        url: ${{ steps['github-repository-create'].output.remoteUrl }}
+      - title: Templated Helm Pull Request
+        url: ${{ steps['github-repository-update'].output.remoteUrl }}
+      - title: ARO Application Pull Request
+        url: ${{ steps['publish-resource'].output.remoteUrl }}
+      - title: Catalog Namespace Resources Pull Request
+        url: ${{ steps['publish-namespace-resources'].output.remoteUrl }}
+    text:
+      - title: Access Instructions
+        content: |
+          ## GitHub Repository
+
+          **Repository:** `${{ steps['variablizer'].output.organization }}/${{ steps['variablizer'].output.name }}`
+
+          **Teams:**
+          - `${{ steps['variablizer'].output.name }}-admin` - Admin access
+          - `${{ steps['variablizer'].output.name }}-write` - Write access
+
+          **Team Maintainer:** ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('technical-owner') }}
+
+          The technical owner can add additional members to these teams.
+
+          ## Namespace Access
+
+          **EntraID Group:** `${{ steps['variablizer-env'].output.namespaceOwnerGroup }}`
+
+          **Group Owner:** ${{ parameters.namespaceOwnerEmail if parameters.addEnvironmentToExistingApp else user.entity.spec.profile.email }}
+
+          Add users as members to this EntraID group to grant access to the ARO namespace and ArgoCD project.
+
+          ## Application URLs
+
+          Your application is accessible at the following URLs:
+
+          {% for env in steps['build-environment-list'].output.allEnvironments.split(',') %}
+          - **${{ env }}:** https://${{ steps['variablizer-env-all'].output.name[loop.index0] }}.apps.dximllac.eastus.aroapp.io/
+          {% endfor %}

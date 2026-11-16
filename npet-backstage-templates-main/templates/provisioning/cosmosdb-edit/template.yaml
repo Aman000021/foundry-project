@@ -1,0 +1,61 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: edit-cosmosdb-account-template
+  title: Edit CosmosDB Account
+  description: Edit databases and collections of an existing CosmosDB Account resource.
+  annotations:
+    nestle.com/template-visibility: private
+    nestle.com/template-scope: regional
+  tags:
+    - azure
+    - cosmosdb
+    - resources
+    - edit
+    - regional
+spec:
+  owner: group:default/aad-sg-backstage-ams-admins
+  type: cloud-template
+
+  parameters:
+    - $yaml: ../../../parameters/provisioning/cosmosdb.yaml
+
+  steps:
+
+    - id: entity
+      name: Get CosmosDB Entity
+      action: catalog:get:entity:data
+      input:
+        ref: ${{ parameters.entity }}
+
+    - $yaml: ../../../steps/catalog/assert-system-techlead-edit.yaml
+
+    - id: system-entity
+      name: Get Parent System
+      action: catalog:get:entity:data
+      input:
+        ref: ${{ steps['entity'].output.system }}
+
+    - $yaml: ../../../steps/provisioning/cosmosdb/resource-edit.yaml
+
+    - $yaml: ../../../steps/catalog/get-entities-config.yaml
+
+    - id: catalog-pr
+      name: Catalog Pull Request
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ steps.getEntitiesConfig.output.entities.repoName }}
+        branchName: entity-update-cosmosdb-${{ steps['entity'].output.name }}-${{ "" | now | replace(":", "-") }}
+        title: Entity Update - CosmosDB Account (${{ steps['entity'].output.name }})
+        description: Update CosmosDB Account resource — modified databases and collections
+        sourcePath: ./${{ steps['system-entity'].output.domain.split('/')[1] }}
+        targetPath: ${{ steps['system-entity'].output.domain.split('/')[1] }}
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+  output:
+    links:
+      - title: Catalog Pull Request
+        url: ${{ steps['catalog-pr'].output.remoteUrl }}

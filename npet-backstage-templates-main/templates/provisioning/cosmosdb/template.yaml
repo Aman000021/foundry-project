@@ -1,0 +1,74 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: provisioning-create-cosmosdb
+  title: Create a CosmosDB Account
+  description: Creates a CosmosDB Account (MongoDB API) resource entity for an existing system.
+  annotations:
+    nestle.com/template-visibility: private
+    nestle.com/template-scope: regional
+  tags:
+    - azure
+    - cosmosdb
+    - resources
+    - regional
+spec:
+  owner: group:default/aad-sg-backstage-ams-admins
+  type: cloud-template
+
+  parameters:
+    - $yaml: ../../../parameters/provisioning/regional-system-picker.yaml
+
+    - $yaml: ../../../parameters/provisioning/cosmosdb.yaml
+
+    - title: Environments
+      required: [environments]
+      properties:
+        environments:
+          title: Environments
+          description: Environments to create this resource in (e.g., dv, ts, pr).
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [dv, ts, np, pp, pr]
+            enumNames:
+              - Development (dv)
+              - Test (ts)
+              - Non-Production (np)
+              - Pre-Production (pp)
+              - Production (pr)
+          uniqueItems: true
+          ui:widget: checkboxes
+
+  steps:
+    - $yaml: ../../../steps/catalog/assert-system-techlead-create.yaml
+
+    - id: system-entity
+      name: Get System Entity
+      action: catalog:get:entity:data
+      input:
+        ref: ${{ parameters.system }}
+
+    - $yaml: ../../../steps/provisioning/cosmosdb/resource.yaml
+
+    - $yaml: ../../../steps/catalog/get-entities-config.yaml
+
+    - id: catalog-pr
+      name: Catalog Pull Request
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ steps.getEntitiesConfig.output.entities.repoName }}
+        branchName: entity-creation-cosmosdb-${{ steps['system-entity'].output.name }}-${{ "" | now | replace(":", "-") }}
+        title: Entity Creation - CosmosDB Account (${{ steps['system-entity'].output.name }})
+        description: Backstage CosmosDB Account entity creation for system ${{ steps['system-entity'].output.name }}
+        sourcePath: ./${{ steps['system-entity'].output.domain.split('/')[1] }}
+        targetPath: ${{ steps['system-entity'].output.domain.split('/')[1] }}
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+  output:
+    links:
+      - title: Catalog Pull Request
+        url: ${{ steps['catalog-pr'].output.remoteUrl }}

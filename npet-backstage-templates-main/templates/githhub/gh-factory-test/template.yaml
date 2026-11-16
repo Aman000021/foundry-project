@@ -1,0 +1,62 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: gh-factory-test
+  version: 1.0.0
+  title: Factory - New Openshift Namespace
+  description: |
+    Test triggering workflow for factories
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - end-user
+    - github
+spec:
+  owner: group:default/AAD-SG-Backstage-factory-hqvev
+  type: github
+
+  parameters:  
+    - title: Factory - New Openshift Namespace
+      properties:
+        systemRef:
+          title: Parent System
+          description: System to associate this component to
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+                names:
+                  - pattern: '^factory-.*'
+        nsname:
+          title: Namespace Name
+          type: string
+          ui:field: Secret
+          description: |
+            Will create a new namespace with the name above
+      required:
+        - systemRef
+        - nsname
+  steps:
+    - action: github:actions:dispatch-with-response
+      id: call-fof-test
+      name: Factory Test
+      input:
+        repoUrl: github.com?repo=fof-test&owner=nestle-it
+        workflowId: factory-test.yml
+        branchOrTagName: main
+        workflowInputs:
+          nsname: ${{ parameters.nsname }}        
+        waitForActionCompletion: true
+        timeout: 1800
+
+  output:
+    links:
+      - title: Check the wofkflow run here
+        url: https://github.com/nestle-it/fof-test/actions/workflows/factory-test.yml
+    text:
+      - title: Workflow Triggered
+        content: |
+          Workflow Triggered

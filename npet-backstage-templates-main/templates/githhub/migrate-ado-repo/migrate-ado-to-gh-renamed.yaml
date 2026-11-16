@@ -1,0 +1,266 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: devtestMigrateAdoToGh
+  title: Devtest Migrate ADO repositories to GitHub
+  description: Devtest Migrate one or more ADO repositories to GitHub and register the migrated repositories in Backstage. Original repositories are set to read-only by default. Associates the selected admin team with the migrated repositories.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - end-user
+    - github
+    - azure
+
+spec:
+  owner: group:default/aad-devtest-backstage-glbl-test004-marleixo
+  type: service
+
+  parameters:
+    - title: Azure Devops Information
+      ui:order:
+        - githubUserVerification
+        - backstageSystem
+        - adminTeam
+        - team
+        - context
+        - ADOOrganization
+        - ADOProject
+        - ADORepo
+        - GitHubOrganization
+        - GitHubVisibility
+        - SetADORepoReadonly
+      properties:
+        githubUserVerification:
+          title: GitHub Account Status
+          type: string
+          ui:field: GithubUserVerification
+        team:
+          title: Team
+          type: string
+          description: |
+            Team name segment for repository naming (mandatory).
+            Repo format: [SCOPE]-[TEAM]-[SOLUTION]-[CONTEXT]-[TITLE]
+        context:
+          title: Context
+          type: string
+          description: |
+            Context segment for the repository name (optional).
+            Defaults to the value from the selected Backstage System. Leave empty to use system default.
+        backstageSystem:
+          title: Backstage System
+          type: string
+          description: The pre-created Backstage system you want the migrated repo(s) to belong to.
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              kind: System
+        adminTeam:
+          title: Admin Team
+          type: string
+          description: |
+            Select the existing GitHub admin team for this migration. The team will have admin access to the migrated repositories.
+            If no teams are available, you need to create a GitHub Team first.
+          ui:field: CatalogTeamPicker
+          ui:options:
+            systemField: backstageSystem
+            permissionFilter: admin
+        ADOOrganization:
+          title: ADO Source Organization
+          type: string
+          enum:
+            - nestle-it
+            - nestle-devtest
+            - nestle-adi
+            - nestle-adms
+            - nestle-ams
+            - nestle-aoa
+            - nestle-dsu
+            - nestle-eur
+            - nestle-globe
+            - nestle-gts
+            - nestle-innovation
+            - nestle-nppc
+            - nestle-projectmgmt
+          enumNames:
+            - nestle-it
+            - nestle-devtest
+            - nestle-adi
+            - nestle-adms
+            - nestle-ams
+            - nestle-aoa
+            - nestle-dsu
+            - nestle-eur
+            - nestle-globe
+            - nestle-gts
+            - nestle-innovation
+            - nestle-nppc
+            - nestle-projectmgmt
+        ADOProject:
+          title: ADO Source Project
+          type: string
+          ui:field: ADOProjectPicker
+        ADORepo:
+          title: ADO Source Repository or Repositories
+          type: array
+          items:
+            type: string
+          ui:field: ADORepositoryPicker
+        GitHubOrganization:
+          title: GitHub Target Organization
+          type: string
+          default: nestle-devtest
+          enum:
+            - nestle-devtest
+          enumNames:
+            - nestle-devtest
+        GitHubVisibility:
+          title: GitHub Repository Visibility
+          type: string
+          default: internal
+          enum:
+            - private
+            - internal
+          enumNames:
+            - Private (visible only to invited users)
+            - Internal (visible to everyone at Nestlé)
+        SetADORepoReadonly:
+          title: (Recommended) Set ADO repository to read-only
+          description: Source repo(s) become read-only AFTER migration. Can be reverted at any time.
+          type: boolean
+          default: true
+      required:
+        - githubUserVerification
+        - adminTeam
+        - team
+        - ADOOrganization
+        - ADOProject
+        - backstageSystem
+        - GitHubOrganization
+        - GitHubVisibility
+        - SetADORepoReadonly
+
+    - title: Pipeline Rewiring
+      description: |
+        Rewire Azure Pipelines to GitHub Repositories. When enabled, all Azure DevOps pipelines linked to the selected repositories will be updated to use the migrated GitHub repositories as their source code. The pipeline YAML files will be read from GitHub, while the pipelines themselves continue to run in Azure DevOps. Existing agents, variable groups, secrets, service connections, environments, approvals, and permissions remain in Azure DevOps and are not migrated. This option updates repository references only, helping you **keep your CI/CD running after repository migration without rebuilding pipelines.**
+        - [Azure Pipelines with GitHub repositories](https://learn.microsoft.com/en-us/azure/devops/pipelines/repos/github?view=azure-devops&tabs=yaml)
+        - [GitHub integration with Azure DevOps](https://learn.microsoft.com/en-us/azure/devops/cross-service/github-integration?view=azure-devops)
+      properties:
+        rewirePipelines:
+          title: Rewire pipelines during migration
+          type: boolean
+          default: false
+
+  steps:
+    - action: github:issues:create
+      id: createIssue
+      name: Create GitHub Issue to track migration (see logs for link)
+      input:
+        repoUrl: github.com/?repo=ghe-migration&owner=nestle-it
+        title: "ADO to GH Migration (${{ context.task.id }})"
+        assignees:
+          - ${{ parameters.githubUserVerification }}
+        body: |
+          This issue is created to track the migration from ADO to GitHub.
+
+          **Migration Details:**
+          - **ADO Organization:** ${{ parameters.ADOOrganization }}
+          - **ADO Project:** ${{ parameters.ADOProject }}
+          - **ADO Repository/Repositories:** ${{ parameters.ADORepo }}
+          - **Backstage system:** ${{ parameters.backstageSystem }}
+          - **Email of user requesting migration:** ${{ user.entity.spec.profile.email }}
+          - **Target GitHub Organization:** ${{ parameters.GitHubOrganization }}
+          - **Target GitHub Visibility:** ${{ parameters.GitHubVisibility }}
+          - **Set ADO Repo Read-only:** ${{ parameters.SetADORepoReadonly }}
+
+          The migration workflow has been triggered @${{ parameters.githubUserVerification }}.
+
+          Updates will be logged in this issue.
+
+    - action: catalog:get:entity:data
+      id: systemInfo
+      name: Get information about selected Backstage system
+      input:
+        ref: ${{ parameters.backstageSystem }}
+
+    - id: calculateRepoNames
+      name: Calculate repository names
+      action: catalog:calculate-repository-names
+      input:
+        organization: ${{ parameters.GitHubOrganization }}
+        scope: ${{ steps['systemInfo'].output.annotations | parseEntityAnnotations('scope') }}
+        team: ${{ parameters.team }}
+        solution: ${{ steps['systemInfo'].output.annotations | parseEntityAnnotations('solution-name') }}
+        context: ${{ parameters.context if parameters.context else steps['systemInfo'].output.annotations | parseEntityAnnotations('context') }}
+        repos: ${{ parameters.ADORepo }}
+        taskId: ${{ context.task.id }}
+
+    - action: github:actions:dispatch-with-response
+      id: migrateAdoToGh
+      name: Migrate repo(s) from ADO to GitHub
+      input:
+        repoUrl: github.com/?repo=ghe-migration&owner=nestle-it
+        workflowId: ado2gh-migration.yml
+        branchOrTagName: main
+        workflowInputs: 
+          ado-organization: ${{ parameters.ADOOrganization }}
+          ado-project: ${{ parameters.ADOProject }}
+          repositories: ${{ steps['calculateRepoNames'].output.repositories }}
+          user-email: ${{ user.entity.spec.profile.email }}
+          user-handle: ${{ parameters.githubUserVerification }}
+          gh-organization: ${{ parameters.GitHubOrganization }}
+          visibility: ${{ parameters.GitHubVisibility }}
+          set-ado-repo-readonly: ${{ parameters.SetADORepoReadonly }}
+          rewire-pipelines: ${{ parameters.rewirePipelines }}
+          apm-id: ${{ steps['systemInfo'].output.annotations | parseEntityAnnotations('apm-id') }}
+          cost-center-id: ${{ steps['systemInfo'].output.annotations | parseEntityAnnotations('cost-center') }}
+          cost-plan: ${{ steps['systemInfo'].output.annotations | parseEntityAnnotations('cost-plan') }}
+        waitForActionCompletion: true
+        timeout: 86400 # 24 hours
+
+    - id: github-team-associate-admin
+      action: github:teams:add-team-to-repository
+      name: Assign Admin Team to Migrated Repos
+      each: ${{ steps['calculateRepoNames'].output.calculatedRepos }}
+      input:
+        repoUrl: github.com?owner=${{ parameters.GitHubOrganization }}&repo=${{ each.value.calculatedName }}
+        slug: ${{ parameters.adminTeam }}
+        permission: admin
+
+    - id: onboardTechdocs
+      name: Onboard TechDocs
+      action: catalog:batch-onboard-techdocs
+      if: ${{ parameters.ADORepo }}
+      input:
+        templateUrl: https://github.com/nestle-devtest/npet-backstage-templates/tree/main/templates/provisioning/onboard-techdocs/content
+        organization: ${{ parameters.GitHubOrganization }}
+        calculatedRepos: ${{ steps['calculateRepoNames'].output.calculatedRepos }}
+        taskId: ${{ context.task.id }}
+        owner: ${{ steps['systemInfo'].output.owner }}
+        system: ${{ parameters.backstageSystem }}
+        repoUrl: github.com/?repo=ghe-migration&owner=nestle-it
+        workflowId: merge-techdocs.yml
+        branchOrTagName: main
+
+    - id: registerComponent
+      name: Register repo(s) in Backstage
+      action: catalog:batch-register
+      input:
+        organization: ${{ parameters.GitHubOrganization }}
+        calculatedRepos: ${{ steps['calculateRepoNames'].output.calculatedRepos }}
+
+  output:
+    links:
+      - title: Migration Issue
+        url: ${{ steps.createIssue.output.issueUrl }}
+      - title: Backstage System
+        url: /catalog/${{ parameters.backstageSystem }}
+    text:
+      - title: Migration finished!
+        content: |
+          The migration is complete.
+
+          To see the migration logs and the migrated repository or repositories, please visit the issue created at ${{ steps.createIssue.output.issueUrl }}.
+
+          The migrated repository or repositories have been registered in Backstage under the system **${{ parameters.backstageSystem.split('/')[1] }}**. Click "Catalog" in the sidebar to see it (note: it can take approximately 15 minutes for the catalog to update).

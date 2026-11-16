@@ -1,0 +1,1 @@
+This folder contains images for other README documents. They are not used by the webapp; only for repo documentation.

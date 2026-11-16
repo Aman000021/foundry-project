@@ -1,0 +1,853 @@
+FOUNDRY ONBOARDING PLATFORM - DEPLOYMENT GUIDE
+Prepared: 2026-06-22
+Repository: npet-foundry-template
+
+================================================================================
+1. OVERVIEW
+================================================================================
+
+This repository provides Infrastructure-as-Code for onboarding use cases onto 
+Azure AI Foundry. It implements a two-stage deployment model:
+
+STAGE 1: PLATFORM DEPLOYMENT (one-time, shared)
+  - Creates shared platform components (observability, security)
+  - Creates Foundry hub resources (AI Foundry accounts)
+  - Outputs hub endpoints and connectivity
+  - Executed via: GitHub workflow "Platform and Foundry Resource Deployment"
+
+STAGE 2: ONBOARDING DEPLOYMENT (per use case, repeatable)
+  - Creates Foundry projects under existing hub resources
+  - Assigns project-level access roles to AD groups
+  - Configures project for application team use
+  - Executed via: GitHub workflow "Foundry Project Deployment"
+
+The critical architecture principle:
+  ✓ Foundry hub resources exist once, shared across many projects
+  ✓ Each onboarding creates ONE OR MORE projects within that hub
+  ✓ This prevents accidental recreation/deletion of shared infrastructure
+
+================================================================================
+2. END-TO-END DEPLOYMENT FLOW
+================================================================================
+
+STEP 1: USE CASE TEAM SUBMITS ONBOARDING REQUEST
+  → ServiceNow or Backstage request system
+  → Includes: project name, segment (marketing/finance), team AD groups, location
+  → Request is approved and forwarded to infrastructure team
+
+STEP 2: REPOSITORY AND CONFIG GENERATION
+  → Central onboarding platform generates GitHub repository from template
+  → Populates environments/<env>/<segment>/*.tfvars with request values
+  → Populates iac/project_configs/<segment>/config.yaml with project metadata
+    • project_name
+    • project_manager_group_id (AD group object ID)
+    • project_manager_user_id (AD user/group object ID for access)
+    • foundry_index (which hub resource this project belongs to)
+  → Infrastructure team receives repository link
+
+STEP 3: TRIGGER DEPLOYMENT
+  → Infrastructure operator opens GitHub Actions
+  → Clicks "Run workflow" on "Trigger Foundry Setup"
+  → Selects:
+    • Environment (dv, pp, pr)
+    • Segment (marketing, finance)
+    • Location (europe)
+  → Workflow begins
+
+STEP 4: TERRAFORM RUNS INITIALIZATION
+  → Terraform init: download providers and modules
+  → Backend configured: remote state stored in Azure Storage
+    • Separate containers for state isolation:
+      - platform stack: tfstate
+      - hub stack: tfstatehub
+      - project stack: tfstateproject
+
+STEP 5: TERRAFORM PLAN AND VALIDATE
+  → Terraform reads:
+    • environments/<segment>/*.tfvars (shared values)
+    • environments/<segment>/<segment>/*.tfvars (segment-specific values)
+    • iac/project_configs/<segment>/config.yaml (project configuration)
+  → Terraform plan: shows what WILL BE CREATED
+  → Human review: infrastructure team approves or rejects changes
+
+STEP 6: TERRAFORM APPLY - PROJECT CREATION
+  → Foundry project resource created
+    • Name: glbl-<env>-<projectname>-prj-cgs
+    • Parent: existing Foundry hub resource
+    • Type: Microsoft.CognitiveServices/accounts/projects
+  → Project endpoints generated
+  → Project status: Ready for application team
+
+STEP 7: TERRAFORM APPLY - ROLE ASSIGNMENT
+  → Two role assignments created at project scope:
+    1. Foundry Project Manager role → assigned to project_manager_group_id
+    2. Foundry User role → assigned to project_manager_user_id
+  → AD groups can now access project through Foundry portal
+  → Application team receives project endpoint and access confirmation
+
+STEP 8: POST-DEPLOYMENT VALIDATION
+  → Verify Terraform apply succeeded
+  → Confirm project visible in Azure portal
+  → Confirm roles assigned correctly
+  → Application team validates access
+  → Documentation updated with project details
+
+================================================================================
+3. TERRAFORM EXECUTION EXPLAINED
+================================================================================
+
+TERRAFORM STACKS AND RESPONSIBILITY
+
+Three independent Terraform stacks exist:
+
+STACK 1: PLATFORM-HUB
+  Location: iac/platform-hub
+  Executes: By platform deployment pipeline (ONE TIME)
+  Creates:
+    • Log Analytics Workspace
+    • Application Insights
+    • Key Vault (via external shared module)
+  Dependencies: None (creates base infra)
+  State location: backend-config-platform.tfvars → container: tfstate
+
+STACK 2: FOUNDRY-HUB
+  Location: iac/capability/foundry-hub
+  Executes: By platform deployment pipeline (ONE TIME)
+  Creates:
+    • Foundry hub resources (Microsoft.CognitiveServices/accounts)
+    • Private endpoints for hub connectivity
+    • Storage container for hub data
+  Dependencies: Platform stack must succeed first
+  Parent Module: iac/modules/foundry-hub
+  State location: backend-config-hub.tfvars → container: tfstatehub
+
+STACK 3: AGENT-SERVICE (ONBOARDING)
+  Location: iac/capability/agent-service
+  Executes: By onboarding deployment pipeline (REPEATABLE)
+  Creates:
+    • Foundry projects (Microsoft.CognitiveServices/accounts/projects)
+    • Project role assignments (Project Manager, User)
+  Dependencies: Foundry hub already exists (created by platform pipeline)
+  Parent Module: iac/modules/agent-service
+  State location: backend-config-project.tfvars → container: tfstateproject
+
+TERRAFORM EXECUTION FLOW IN PIPELINE
+
+Platform Pipeline (.github/workflows/platform-deploy.yml):
+  1. Checkout code
+  2. OIDC login to Azure
+  3. Run Stack 1 (Platform Hub):
+     - terraform init -backend-config=backend-config-platform.tfvars
+     - terraform plan -var-file=platform.tfvars
+     - terraform apply
+  4. Run Stack 2 (Foundry Hub):
+     - terraform init -backend-config=backend-config-hub.tfvars
+     - terraform plan -var-file=foundry-hub.tfvars -var=project_segment=<segment>
+     - terraform apply
+
+Agent/Onboarding Pipeline (.github/workflows/agent-capability-deploy.yml):
+  1. Checkout code
+  2. OIDC login to Azure
+  3. Plan Job:
+     - terraform init -backend-config=backend-config-project.tfvars
+     - terraform plan -var-file=agent-service.tfvars -var=project_segment=<segment> -var=foundry_location=<location>
+     - Upload tfplan artifact
+  4. Apply Job (manual approval):
+     - Download tfplan artifact
+     - terraform apply tfplan
+
+VARIABLE INJECTION
+
+Terraform variables flow from multiple sources:
+
+  Source 1: GitHub Workflow Inputs
+    • environment (dv, pp, pr)
+    • segment (marketing, finance)
+    • location (europe, etc.)
+    • ↓ Passed to Terraform via -var flags
+
+  Source 2: Terraform Variable Files (tfvars)
+    • environments/<env>/platform.tfvars
+    • environments/<env>/<segment>/foundry-hub.tfvars
+    • environments/<env>/<segment>/agent-service.tfvars
+    • ↓ Loaded via -var-file flags
+
+  Source 3: Configuration YAML Files
+    • iac/foundry_hub_configs/<segment>/config.yaml
+      - Lists which hub resources exist
+      - Specifies subnets for private endpoints
+    • iac/project_configs/<segment>/config.yaml
+      - Lists projects to create
+      - Specifies AD group IDs for roles
+      - Specifies which hub each project belongs to (foundry_index)
+    • ↓ Read by Terraform locals and used in for_each loops
+
+  Source 4: GitHub Environment Secrets
+    • TENANT_ID
+    • SUBSCRIPTION_ID
+    • PLATFORM_CLIENT_ID / AGENT_CLIENT_ID
+    • ↓ Used for OIDC authentication to Azure
+
+================================================================================
+4. RESOURCES CREATED DURING ONBOARDING
+================================================================================
+
+When the agent-service stack (onboarding pipeline) executes, it creates:
+
+RESOURCE: Foundry Project
+  Type: Microsoft.CognitiveServices/accounts/projects
+  Location: iac/modules/agent-service/main.tf
+  Naming: glbl-<environment>-<project_name>-prj-cgs
+  Parent: Existing Foundry hub (referenced by foundry_index)
+  Count: One per entry in iac/project_configs/<segment>/config.yaml
+  Managed By: Terraform for_each loop over config YAML
+
+RESOURCE: Foundry Project Manager Role Assignment
+  Type: azurerm_role_assignment
+  Location: iac/modules/agent-service/roles.tf
+  Scope: Project resource
+  Role Name: "Foundry Project Manager"
+  Principal: project_manager_group_id from config.yaml
+  Count: One per project
+
+RESOURCE: Foundry User Role Assignment
+  Type: azurerm_role_assignment
+  Location: iac/modules/agent-service/roles.tf
+  Scope: Project resource
+  Role Name: "Foundry User"
+  Principal: project_manager_user_id from config.yaml
+  Count: One per project
+
+SUMMARY:
+  ✓ Creates: Foundry projects + role assignments
+  ✓ Does NOT create: Hub resources, resource groups, VNets, AD groups
+  ✓ Does NOT modify: Platform infrastructure
+  ✓ Result: Use case team can access project immediately after apply
+
+================================================================================
+5. PRE-EXISTING PLATFORM COMPONENTS
+================================================================================
+
+The following must already exist BEFORE onboarding pipeline runs:
+
+PREREQUISITE 1: Azure Subscription and Resource Groups
+  • Resource group for hub infrastructure (e.g., glbl-ts-adiagtsvmkt-adi-euwe-rgp)
+  • Resource group for platform shared services (e.g., glbl-ts-adifoundryhub-adi-euwe-rgp)
+  • Scope: Created and managed by enterprise cloud team
+  • Used by: Terraform via data.azurerm_resource_group lookups
+
+PREREQUISITE 2: Virtual Network and Subnets
+  • VNet for private endpoint connectivity
+  • Delegated subnets with available IP space
+  • Scope: Created and managed by enterprise networking team
+  • Used by: Terraform via data.azurerm_virtual_network and data.azurerm_subnet lookups
+
+PREREQUISITE 3: Storage Account
+  • Storage account for Terraform remote state
+  • Separate containers: tfstate, tfstatehub, tfstateproject
+  • Scope: Created by enterprise infrastructure team
+  • Used by: Terraform backend configuration in backend-config-*.tfvars
+
+PREREQUISITE 4: Foundry Hub Resource
+  • AI Foundry hub (Microsoft.CognitiveServices/accounts)
+  • Created once per segment by platform deployment pipeline
+  • Outputs: Hub resource ID, project management capabilities
+  • Scope: Shared infrastructure, referenced by all onboarding projects
+  • Used by: Terraform modules to find parent hub for project creation
+
+PREREQUISITE 5: Azure AD Groups
+  • Project Manager AD group (object ID provided in config.yaml)
+  • User/Team AD group (object ID provided in config.yaml)
+  • Members already assigned by enterprise IAM team
+  • Scope: Identity management
+  • Used by: Terraform role assignment resources
+
+PREREQUISITE 6: Platform Services
+  • Log Analytics Workspace
+  • Application Insights
+  • Key Vault
+  • All created by platform deployment pipeline (Stage 1)
+  • Outputs: Workspace/vault identifiers used by project monitoring
+
+SUMMARY TABLE:
+┌──────────────────────────────────────┬──────────────────────────────────┐
+│ Component                            │ Created By                       │
+├──────────────────────────────────────┼──────────────────────────────────┤
+│ Resource Groups                      │ Enterprise Cloud Team (prereq)   │
+│ VNet & Subnets                       │ Enterprise Network Team (prereq) │
+│ Storage Account                      │ Enterprise Cloud Team (prereq)   │
+│ Platform Services (LA, App Insights) │ Platform Pipeline (Stage 1)      │
+│ Foundry Hub Resource                 │ Platform Pipeline (Stage 1)      │
+│ AD Groups                            │ Enterprise IAM Team (prereq)     │
+│ Foundry Project                      │ Onboarding Pipeline (THIS STEP)  │
+│ Project Roles                        │ Onboarding Pipeline (THIS STEP)  │
+└──────────────────────────────────────┴──────────────────────────────────┘
+
+CRITICAL PRINCIPLE:
+  Onboarding assumes all prerequisites exist.
+  Onboarding does NOT create any shared infrastructure.
+  This ensures projects can be safely created/destroyed without affecting others.
+
+================================================================================
+6. INPUTS AND VARIABLES
+================================================================================
+
+REQUIRED INPUTS FOR ONBOARDING
+
+FROM SERVICENOW REQUEST (captured at request time):
+  • project_name: Use case or project identifier (e.g., "customer-analytics")
+  • segment: Business unit (marketing, finance, other)
+  • AD group for Project Manager: Display name and object ID
+  • AD group for Users: Display name and object ID
+  • location: Deployment region (europe, etc.)
+  • environment: Target environment (dv=dev, pp=preproduction, pr=production)
+
+INPUTS SELECTED AT WORKFLOW DISPATCH:
+  • environment: dv / pp / pr
+  • segment: marketing / finance (or others added later)
+  • location: europe / other locations
+
+TERRAFORM VARIABLE FILES
+
+File: environments/<env>/platform.tfvars (Platform stack)
+Contains:
+  environment_name = "dv"
+  resource_group_name = "glbl-ts-adifoundryhub-adi-euwe-rgp"
+  shared_subnet_name = "emna-np-g.2-adi-euwe-001-snt"
+  storage_account = "glbltsplatformadi644sta"
+  key_name = "glbltsplatform644key"
+  log_analytics_name = "glbl-ts-platformhub-log"
+
+File: environments/<env>/<segment>/foundry-hub.tfvars (Hub stack)
+Contains:
+  environment_name = "dv"
+  solution_name = "agentservice"
+  resource_group_name = "glbl-ts-adiagtsvmkt-adi-euwe-rgp"
+  storage_account = "glbltsagentsvcadi729sta"
+  storage_container_name = "foundry"
+  vnet_name = "emna-np-network-adi-euwe-001-vnt"
+  vnet_resource_group_name = "emna-np-network-adi-euwe-001-rgp"
+
+File: environments/<env>/<segment>/agent-service.tfvars (Onboarding/Project stack)
+Contains:
+  environment_name = "dv"
+  solution_name = "agentservice"
+  resource_group_name = "glbl-ts-adiagtsvmkt-adi-euwe-rgp"
+  storage_account = "glbltsagentsvcadi729sta"
+  storage_container_name = "foundry"
+  shared_subnet_name = "emna-np-g.2-adi-euwe-001-snt"
+
+CONFIGURATION YAML FILES
+
+File: iac/foundry_hub_configs/<segment>/config.yaml
+Example:
+  - resource_index: "mkt001"
+    resource_subnet: "emna-np-g.2-adi-euwe-001-snt"
+  - resource_index: "mkt002"
+    resource_subnet: "emna-np-g.3-adi-euwe-001-snt"
+
+Defines: Which Foundry hubs exist and their network location
+
+File: iac/project_configs/<segment>/config.yaml
+Example:
+  - project_name: analytics-platform
+    project_segment: marketing
+    foundry_index: "mkt001"
+    project_manager_group_id: 0bce9cc6-5820-447d-a8c5-6e7cccf7523a
+    project_manager_user_id: 6022217d-ac60-4915-a8b9-e663dfa87487
+
+  - project_name: customer-insights
+    project_segment: marketing
+    foundry_index: "mkt001"
+    project_manager_group_id: 0bce9cc6-5820-447d-a8c5-6e7cccf7523a
+    project_manager_user_id: 6022217d-ac60-4915-a8b9-e663dfa87487
+
+Defines:
+  • project_name: Unique identifier (becomes part of resource name)
+  • project_segment: Segment it belongs to
+  • foundry_index: Which hub resource it's created under
+  • project_manager_group_id: AD group with manager permissions
+  • project_manager_user_id: AD group/user with user permissions
+
+VARIABLE FLOW EXAMPLE
+
+User submits ServiceNow request:
+  {
+    "project_name": "analytics-platform",
+    "segment": "marketing",
+    "pm_group_id": "0bce9cc6-5820-447d-a8c5-6e7cccf7523a"
+  }
+
+Platform team creates entry in iac/project_configs/marketing/config.yaml
+
+Operator triggers workflow selecting:
+  environment = dv
+  segment = marketing
+  location = europe
+
+Workflow passes to Terraform:
+  1. Read environments/dv/marketing/agent-service.tfvars
+  2. Read -var="project_segment=marketing"
+  3. Read -var="foundry_location=europe"
+  4. Read iac/project_configs/marketing/config.yaml
+  5. Terraform for_each loops over projects in YAML
+  6. Creates project and roles using values from files
+
+================================================================================
+7. PIPELINE EXECUTION FLOW
+================================================================================
+
+GITHUB ACTION WORKFLOWS
+
+Primary Trigger: .github/workflows/iac.yaml
+  • Type: workflow_dispatch (manual)
+  • Inputs: environment, segment, location
+  • Action: Routes to appropriate reusable workflow
+  • Options show: dv/pp/pr environments, marketing/finance segments, europe/other locations
+
+Reusable Workflow 1: .github/workflows/platform-deploy.yml
+  • Called by: Manual selection in iac.yaml
+  • Executes: Stacks 1 and 2 (Platform Hub + Foundry Hub)
+  • Jobs:
+    1. platform-hub-deployment
+       - Working dir: iac/platform-hub
+       - Commands: terraform init → plan → apply
+    2. foundry-hub-deployment (depends on platform job)
+       - Working dir: iac/capability/foundry-hub
+       - Commands: terraform init → plan → apply
+
+Reusable Workflow 2: .github/workflows/agent-capability-deploy.yml
+  • Called by: Manual selection in iac.yaml
+  • Executes: Stack 3 (Agent Service / Onboarding)
+  • Jobs:
+    1. plan job
+       - Working dir: iac/capability/agent-service
+       - Commands: terraform init → plan
+       - Output: tfplan artifact uploaded
+    2. apply job (requires artifact from plan)
+       - Working dir: iac/capability/agent-service
+       - Commands: terraform init → apply tfplan
+
+AUTHENTICATION FLOW
+
+Each workflow:
+  1. Checks out repository code
+  2. Uses azure/login@v1 with OIDC
+  3. Provides credentials:
+     - client-id: PLATFORM_CLIENT_ID or AGENT_CLIENT_ID (from GitHub Environment)
+     - tenant-id: TENANT_ID (from GitHub Environment)
+     - subscription-id: SUBSCRIPTION_ID (from GitHub Environment)
+  4. No secrets stored; tokens generated on-the-fly
+  5. Terraform uses inherited Azure CLI authentication
+
+SEPARATION PRINCIPLE
+
+Platform Pipeline (stage-1):
+  • Creates shared infrastructure once
+  • Execution: Manual, controlled
+  • Frequency: Once per segment
+  • Risk: Moderate (affects all projects in segment)
+  • Approval: Multi-team (platform, security, network)
+
+Onboarding Pipeline (stage-2):
+  • Creates individual projects
+  • Execution: Manual, controlled
+  • Frequency: Once per use case
+  • Risk: Low (affects only one project)
+  • Approval: Use case team + infrastructure team
+
+These are separate to prevent:
+  ✗ Accidental recreation of shared hub resources
+  ✗ Deletion of projects due to platform updates
+  ✗ Cross-project impact from onboarding changes
+
+================================================================================
+8. ROLE ASSIGNMENTS
+================================================================================
+
+FOUNDRY PROJECT ROLES
+
+Two roles are assigned at project scope:
+
+ROLE 1: Foundry Project Manager
+  • Permissions: Can manage project, configure, administer access
+  • Assigned to: project_manager_group_id from config.yaml
+  • Impact: Full project administration
+  • Typical Members: Use case lead, DevOps team lead
+
+ROLE 2: Foundry User
+  • Permissions: Can use project, run experiments, access resources
+  • Assigned to: project_manager_user_id from config.yaml
+  • Impact: Standard project usage
+  • Typical Members: Data scientists, developers, analysts
+
+TERRAFORM IMPLEMENTATION
+
+File: iac/modules/agent-service/roles.tf
+
+Resource 1: azurerm_role_assignment "foundry_project_manager"
+  for_each = local.project_names
+  scope = azapi_resource.ai_foundry_project[each.key].id
+  role_definition_name = "Foundry Project Manager"
+  principal_id = each.value.manager_group_id
+
+Resource 2: azurerm_role_assignment "foundry_project_user"
+  for_each = local.project_names
+  scope = azapi_resource.ai_foundry_project[each.key].id
+  role_definition_name = "Foundry User"
+  principal_id = each.value.user_group_id
+
+CONFIGURATION MAPPING
+
+Config YAML entry:
+  - project_name: analytics-platform
+    project_manager_group_id: 0bce9cc6-...    ← Project Manager role
+    project_manager_user_id: 6022217d-...     ← Foundry User role
+
+Terraform processes:
+  1. Reads YAML (locals.ts)
+  2. for_each loop creates roles for each project
+  3. Assigns roles to AD group object IDs
+  4. AD groups control access via Foundry portal
+
+ACTIVATION TIMING
+
+After terraform apply completes:
+  1. Roles exist in Azure
+  2. AD groups gain permissions
+  3. Group members can immediately access project
+  4. Access is visible in Foundry portal
+  5. Users log in with their corporate credentials
+
+RISK: Incorrect Object IDs
+
+If AD group object IDs are wrong:
+  ✗ Deployment succeeds but wrong groups get access
+  ✗ Intended users cannot access project
+  ✗ Unintended users might gain access
+  ✓ Fix: Update config.yaml with correct object IDs, re-run terraform apply
+
+================================================================================
+9. CONSTRAINTS AND ASSUMPTIONS
+================================================================================
+
+CONSTRAINT 1: Resource Groups Pre-exist
+  • Assumption: Azure resource groups already created for each environment
+  • Location: Defined in tfvars files
+  • Terraform Action: Reads via data.azurerm_resource_group lookup
+  • NOT created by this repository
+  • Impact: If RG missing, Terraform fails
+
+CONSTRAINT 2: AD Groups Pre-exist
+  • Assumption: Azure AD groups exist with known object IDs
+  • Location: Enterprise IAM directory
+  • Terraform Action: Uses object IDs from config.yaml
+  • NOT created by this repository
+  • Impact: If IDs wrong, roles assigned to wrong group
+
+CONSTRAINT 3: Foundry Hub Resource Pre-exists
+  • Assumption: Hub created by platform deployment pipeline beforehand
+  • Location: Foundry hub stack in iac/capability/foundry-hub
+  • Terraform Action: Referenced by project creation via data lookup
+  • NOT created by onboarding pipeline
+  • Impact: Projects cannot be created without hub
+
+CONSTRAINT 4: Separate State Backends
+  • Assumption: Three storage containers exist with distinct names
+  • Containers: tfstate (platform), tfstatehub (hub), tfstateproject (project)
+  • Terraform Action: Initialized separately for each stack
+  • Impact: Misconfiguration causes state collision or loss
+
+CONSTRAINT 5: VNet and Subnets Pre-exist
+  • Assumption: Azure VNet with named subnets already exists
+  • Location: Enterprise networking
+  • Terraform Action: Reads via data.azurerm_subnet lookup
+  • Used for: Private endpoint connectivity
+  • Impact: If subnets missing, private endpoints cannot be created
+
+CONSTRAINT 6: Storage Account Pre-exists
+  • Assumption: Storage account exists for state and data containers
+  • Location: Enterprise cloud storage
+  • Terraform Action: Reads via data.azurerm_storage_account lookup
+  • Used for: Terraform state and project data
+  • Impact: If missing, Terraform backend fails
+
+CONSTRAINT 7: OIDC Authentication Pre-configured
+  • Assumption: GitHub federated identity configured in Azure
+  • Location: Managed by enterprise cloud/GitHub teams
+  • Terraform Action: Uses OIDC token from GitHub Actions
+  • Used for: Passwordless authentication
+  • Impact: If not configured, pipelines fail authentication
+
+CONSTRAINT 8: Segment Configuration Complete
+  • Assumption: Segment tfvars and YAML config files populated
+  • Location: environments/<env>/<segment>/ and iac/*_configs/<segment>/
+  • Terraform Action: Reads and validates configuration
+  • Used for: Project and hub provisioning
+  • Impact: Missing files cause Terraform errors
+
+CONSTRAINT 9: Project Names Unique
+  • Assumption: project_name values in config.yaml are unique per segment
+  • Location: iac/project_configs/<segment>/config.yaml
+  • Terraform Action: Used in for_each loop and resource naming
+  • Used for: Preventing naming collisions
+  • Impact: Duplicate names cause creation failure
+
+CONSTRAINT 10: Naming Convention Strict
+  • Assumption: Resource names follow Nestle CAF standard naming
+  • Pattern: glbl-<env>-<name>-<context>-<type>
+  • Terraform Action: Enforced in locals.tf and main.tf
+  • Used for: Compliance and consistency
+  • Impact: Non-compliant names rejected by policies
+
+SUMMARY:
+  All constraints are designed to ensure:
+  ✓ Safe, repeatable onboarding
+  ✓ No shared resource conflicts
+  ✓ Clear separation of concerns
+  ✓ Enterprise governance compliance
+
+================================================================================
+10. RISKS AND CONSIDERATIONS
+================================================================================
+
+RISK 1: Accidental Foundry Hub Deletion
+Scenario: Operator runs agent-capability-deploy on wrong hub stack code
+Impact: ALL projects in hub are destroyed
+Likelihood: Low (workflows are separate)
+Mitigation:
+  ✓ Use only agent-capability-deploy for onboarding
+  ✓ Platform pipeline should never run during onboarding
+  ✓ Clear documentation separating workflows
+  ✓ Require code review for hub-stack changes
+
+RISK 2: Incorrect AD Group Object IDs
+Scenario: Wrong object ID in config.yaml → wrong group gets access
+Impact: Access control violation (wrong users have permissions)
+Likelihood: Medium (manual entry error)
+Mitigation:
+  ✓ Validate object IDs against Azure AD before entry
+  ✓ Use Azure AD lookup or directory tool
+  ✓ Require dual approval for config.yaml changes
+  ✓ Run terraform plan and review role assignments before apply
+
+RISK 3: State Backend Misconfiguration
+Scenario: Wrong container name in backend-config → state corruption or loss
+Impact: Terraform cannot track resources; re-apply might duplicate
+Likelihood: Low (backend config is validated at init)
+Mitigation:
+  ✓ Use strict naming: tfstate / tfstatehub / tfstateproject
+  ✓ Document backend per stack
+  ✓ Prevent manual backend edits
+  ✓ Test backend connectivity before production use
+
+RISK 4: Resource Group Does Not Exist
+Scenario: tfvars points to non-existent resource group
+Impact: Terraform plan fails; no resources created
+Likelihood: Low (RGs created by enterprise team beforehand)
+Mitigation:
+  ✓ Validate RG exists before running pipeline
+  ✓ Include RG creation in platform prerequisites checklist
+  ✓ Clear error message when RG not found
+
+RISK 5: VNet/Subnet Configuration Missing
+Scenario: Private endpoint subnets not available or wrong CIDR
+Impact: Private endpoints fail to create; connectivity issues
+Likelihood: Low (network team coordinates beforehand)
+Mitigation:
+  ✓ Network team provides subnet list to platform team
+  ✓ Validate subnet names in foundry_hub_configs YAML
+  ✓ Test connectivity before onboarding projects
+
+RISK 6: Project Already Exists
+Scenario: Same project_name in config.yaml run twice
+Impact: Terraform detects no change; idempotent apply
+Likelihood: Very Low (Terraform state prevents duplicates)
+Mitigation:
+  ✓ Terraform tracks projects in state
+  ✓ Rerunning apply is safe if config unchanged
+  ✓ Check terraform plan output before apply
+
+RISK 7: Segment Configuration Incomplete
+Scenario: Marketing segment populated but Finance empty
+Impact: Cannot onboard finance projects until config complete
+Likelihood: Medium (depends on onboarding setup process)
+Mitigation:
+  ✓ Platform team completes all segment configs during setup
+  ✓ Populate Finance with sample/example values if not used yet
+  ✓ Document required config structure for new segments
+
+RISK 8: OIDC Token Expired or Misconfigured
+Scenario: GitHub federated identity not working
+Impact: Terraform cannot authenticate to Azure; apply fails
+Likelihood: Low (configured once, rarely changes)
+Mitigation:
+  ✓ Cloud team validates OIDC setup before production
+  ✓ Check Azure → Managed Identities for GitHub configuration
+  ✓ Run test pipeline before using for onboarding
+
+RISK 9: Naming Convention Violation
+Scenario: Resource name does not match CAF standard
+Impact: Azure policies reject creation
+Likelihood: Medium (developer error in config)
+Mitigation:
+  ✓ Terraform locals enforce naming rules
+  ✓ Review terraform plan output for compliance
+  ✓ Fail fast if non-compliant names detected
+
+RISK 10: Project Already Exists in Foundry
+Scenario: Project manually created in Foundry → Terraform tries to recreate
+Impact: Resource conflict; recreation triggered
+Likelihood: Low (should use Terraform only)
+Mitigation:
+  ✓ Never create projects manually; always use Terraform
+  ✓ If manual creation occurred, import to state or delete
+  ✓ Enforce: All projects created via pipeline only
+
+OPERATIONAL BEST PRACTICES:
+
+Before Onboarding:
+  ✓ Verify platform pipeline completed successfully
+  ✓ Confirm Foundry hub resource exists
+  ✓ Validate AD group object IDs in config.yaml
+  ✓ Confirm all tfvars files populated
+  ✓ Run terraform plan and review output
+
+During Onboarding:
+  ✓ Follow terraform plan output exactly
+  ✓ Do not make manual changes in Azure during apply
+  ✓ Wait for apply completion before next step
+  ✓ Check for errors in workflow logs
+
+After Onboarding:
+  ✓ Verify project appears in Foundry portal
+  ✓ Confirm roles visible in project access control
+  ✓ Test access with project manager group member
+  ✓ Document project creation in change log
+  ✓ Notify application team of project readiness
+
+================================================================================
+11. POST-ONBOARDING STEPS
+================================================================================
+
+STEP 1: VERIFY TERRAFORM SUCCESS
+  Action: Check GitHub workflow logs
+  Look for: "Terraform apply" completed successfully
+  Verify: No errors or warnings in apply output
+  Expected: All 3 resources created (1 project + 2 role assignments)
+  Timing: Immediate after workflow completion
+
+STEP 2: CONFIRM PROJECT IN AZURE PORTAL
+  Action: Navigate to Azure portal → Cognitive Services
+  Look for: Project resource with name glbl-<env>-<projectname>-prj-cgs
+  Verify: Resource status is "Ready"
+  Verify: Resource group matches tfvars value
+  Expected: Project metadata visible (subscriptions, resource group, location)
+  Timing: Within 1 minute of apply completion
+
+STEP 3: VERIFY ROLE ASSIGNMENTS
+  Action: In Azure portal → Project → Access Control (IAM)
+  Look for:
+    - Foundry Project Manager role → project_manager_group_id
+    - Foundry User role → project_manager_user_id
+  Verify: Both roles appear and scope is Project
+  Expected: Two role assignments visible
+  Timing: Within 1 minute of apply completion
+
+STEP 4: TEST AD GROUP ACCESS
+  Action: Log in to Foundry portal with team member account
+  Verify: User is in project_manager_group_id
+  Look for: Project visible in "My Projects" list
+  Expected: Project accessible via Foundry web UI
+  Timing: Can take 5-10 minutes for role propagation
+  Mitigation: If access not visible, clear browser cache or wait 10 minutes
+
+STEP 5: CONFIRM PROJECT ENDPOINTS
+  Action: In Foundry portal → Project Settings → API Endpoints
+  Look for: Project API endpoint URL
+  Verify: URL format is valid and accessible
+  Record: Copy endpoint URL for application team documentation
+  Expected: Endpoint URL in format https://...foundry...
+  Timing: Visible immediately after step 2
+
+STEP 6: VALIDATE PRIVATE ENDPOINT CONNECTIVITY
+  Action: From authorized network, test connectivity to Foundry endpoint
+  Verify: Private endpoint routes traffic correctly
+  Test: DNS resolution works (private endpoint fqdn)
+  Expected: Network connectivity successful
+  Timing: Test from application network after project ready
+  Mitigation: If connectivity fails, check VNet/subnet/NSG rules
+
+STEP 7: NOTIFY APPLICATION TEAM
+  Action: Send project ready notification
+  Include:
+    - Project name and ID
+    - Project Manager group members can access
+    - Foundry portal URL and login instructions
+    - Project API endpoint
+    - Support contact for issues
+  Timing: After step 4 completes (access confirmed)
+  Document: Save notification in project documentation
+
+STEP 8: CREATE PROJECT DOCUMENTATION
+  Action: In your team wiki or docs, record:
+    - Project creation date
+    - Use case / business purpose
+    - Resource group and subscription
+    - Segment and environment
+    - Project managers and users
+    - API endpoint
+    - Any custom configurations applied
+  Timing: After step 5 completes
+  Purpose: Audit trail and operational reference
+
+STEP 9: EXECUTE ACCEPTANCE TESTING
+  Action: Application team validates:
+    - Can log in to project
+    - Can create experiments/models
+    - Can access shared resources
+    - Role permissions work as expected
+  Expected: All application workflows functional
+  Timing: Within 24 hours of project creation
+  Contingency: If issues, contact platform team
+
+STEP 10: CLOSE SERVICENOW REQUEST
+  Action: Update ServiceNow onboarding request
+  Status: Mark as Complete
+  Comments: Project created successfully, project ID and endpoint
+  Timing: After step 9 acceptance testing passes
+  Purpose: Audit record and ticket closure
+
+TROUBLESHOOTING DURING VALIDATION:
+
+Issue: Project not visible in Azure portal
+  Cause: Terraform apply may still be running
+  Fix: Wait 2 minutes and refresh portal
+  If persists: Check workflow logs for errors
+
+Issue: Roles not visible in IAM
+  Cause: Role assignment may not have propagated
+  Fix: Wait 5 minutes and refresh IAM blade
+  If persists: Re-run "terraform apply" (idempotent)
+
+Issue: Cannot access project in Foundry portal
+  Cause: Role propagation delay or wrong group ID
+  Fix: Wait 10 minutes for propagation
+  Check: Verify user is member of project_manager_group_id in Azure AD
+  If persists: Verify object ID in config.yaml is correct
+
+Issue: Private endpoint connectivity fails
+  Cause: DNS not resolving or network blocked
+  Fix: Check private endpoint DNS zone configuration
+  Verify: NSG rules allow traffic from application network
+  Contact: Network team for routing/firewall rules
+
+Issue: Terraform plan shows changes when none expected
+  Cause: Configuration drift or state issue
+  Fix: Review plan output carefully
+  If safe: Apply changes
+  If concerning: Contact platform team before proceeding
+
+================================================================================
+END OF DEPLOYMENT GUIDE
+================================================================================

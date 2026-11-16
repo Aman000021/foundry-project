@@ -1,0 +1,335 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: nexus-ci-pipeline-run
+  title: "Nexus CI Pipeline - Azure DevOps"
+  description: >
+    Launches the Nexus CI pipeline in Azure DevOps. Allows configuring
+    quality tests, model training, evaluation, Snowflake data preprocessing,
+    AutoML, and custom model actions directly from Backstage.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - azure-devops
+    - mlops
+    - nexus
+    - data-ingestion
+spec:
+  owner: group:default/AAD-SG-backstage-innovation
+  type: ci-pipeline
+  
+  parameters:
+
+    - title: Azure DevOps Pipeline branch
+      description: Select the Azure DevOps branch to run the pipeline against.
+      required:
+        - branch
+      properties:
+        branch:
+          title: Branch
+          type: string
+          enum: ["PRD", "PPD", "dev"]
+          description: Branch to run the pipeline against.
+          default: PRD
+
+
+    - title: Execution Options
+      description: Choose which stages of the CI pipeline to run. All fields are optional and use sensible defaults.
+      required:
+        - ref
+        - pipelineId
+      properties:
+        ref:
+          title: Parent System
+          description: System to associate this Resource Group to.
+          type: string
+          default: system:default/itinnovation-global
+          ui:widget: hidden
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+
+        organization:
+          title: Organization
+          type: string
+          description: Azure DevOps organization name.
+          default: nestle-it
+          ui:widget: hidden
+
+        project:
+          title: Project
+          type: string
+          description: Azure DevOps project name.
+          default: aipcroasterdeszw
+          ui:widget: hidden
+
+        pipelineId:
+          title: Pipeline ID
+          type: number
+          description: >
+            Numeric ID of the CI pipeline in Azure DevOps.
+            You can find it in the URL of the pipeline page.
+          default: 14166
+          ui:widget: hidden
+
+        run_quality_tests:
+          title: Run Quality Tests
+          type: string
+          default: "True"
+          enum: ["True", "False"]
+          description: Execute lint tests and code quality checks.
+
+        run_environment_ci:
+          title: Run Environment CI
+          type: string
+          default: "True"
+          enum: ["True", "False"]
+          description: Execute environment CI stage.
+
+        run_model_governance:
+          title: Run Model Governance
+          type: string
+          default: "False"
+          enum: ["True", "False"]
+          description: Execute model governance checks.
+
+        run_model_ci:
+          title: Run Model CI
+          type: string
+          default: "True"
+          enum: ["True", "False"]
+          description: Execute the full Model CI stage.
+
+    - title: Model CI Configuration
+      description: Fine-tune which parts of the Model CI stage to execute. All fields are optional.
+      properties:
+        run_snowflake_data_preprocessing:
+          title: Run Snowflake Data Preprocessing
+          type: string
+          default: "True"
+          enum: ["True", "False"]
+          description: "Model CI: run Snowflake data preprocessing step."
+
+        run_automl:
+          title: Run AutoML
+          type: string
+          default: "True"
+          enum: ["True", "False"]
+          description: "Model CI: run AutoML experiment."
+
+        run_model_training:
+          title: Run Model Training
+          type: string
+          default: "False"
+          enum: ["True", "False"]
+          description: "Model CI: run model training pipeline."
+
+        run_model_evaluation:
+          title: Run Model Evaluation
+          type: string
+          default: "False"
+          enum: ["True", "False"]
+          description: "Model CI: run model evaluation pipeline."
+
+        run_model_prediction:
+          title: Run Model Prediction
+          type: string
+          default: "False"
+          enum: ["True", "False"]
+          description: "Model CI: run model prediction pipeline."
+
+        create_pull_request:
+          title: Create Pull Request
+          type: string
+          default: "False"
+          enum: ["True", "False"]
+          description: "Model CI: create a pull request after run."
+
+    - title: Custom Model Actions
+      description: Optionally retrain, evaluate, or predict an existing model.
+      properties:
+        custom_model_action:
+          title: Action on Model
+          type: string
+          default: "Do not perform any action"
+          enum:
+            - "Do not perform any action"
+            - "Retrain selected model"
+            - "Evaluate/Predict selected model"
+          description: >
+            Choose an action on a specific model.
+            If you choose retrain or evaluate, fill in the model name below.
+
+        custom_model_name:
+          title: Model Name
+          type: string
+          default: "<model_name>"
+          description: >
+            Valid & existing model name. Use only with
+            "Retrain selected model" or "Evaluate/Predict selected model".
+
+        custom_model_version:
+          title: Model Version
+          type: string
+          default: "<model_version>"
+          description: >
+            Model version (integer). Use only with
+            "Evaluate/Predict selected model".
+
+    - title: Data Source & Snowflake
+      description: Configure the data source and Snowflake timestamp settings. All fields are optional.
+      properties:
+        data_source:
+          title: Data Source
+          type: string
+          default: "AML MLTable"
+          enum:
+            - "AML MLTable"
+            - "Snowflake"
+          enumNames:
+            - "AML MLTable"
+            - "❄ Snowflake"
+          description: Select the data source for the AML pipeline.
+
+        dataset_version:
+          title: Dataset Version
+          type: string
+          default: "latest"
+          description: "Allowed values: 'latest' or a version number."
+
+        data_asset_pattern:
+          title: Data Asset Pattern
+          type: string
+          default: "*.parquet"
+          description: Custom glob pattern for data assets.
+
+        snowflake_train_timestamp:
+          title: Snowflake Training Timestamp
+          type: string
+          default: "latest"
+          description: >
+            Timestamp of the Snowflake training table.
+            Use "latest" for the latest version.
+
+        snowflake_eval_timestamp:
+          title: Snowflake Eval Timestamp
+          type: string
+          default: "latest"
+          description: >
+            Timestamp of the Snowflake eval table.
+            Use "latest" for the latest version.
+
+        snowflake_predict_timestamp:
+          title: Snowflake Predict Timestamp
+          type: string
+          default: "latest"
+          description: >
+            Timestamp of the Snowflake predict table.
+            Use "latest" for the latest version.
+
+        snowflake_time_travel:
+          title: Snowflake Resync
+          type: string
+          default: "False"
+          enum: ["True", "False"]
+          description: >
+            Resync Snowflake table with data from the MLOps datastore in AML.
+
+    - title: Advanced Options
+      description: Additional pipeline configuration. All fields are optional.
+      properties:
+        auto_start_pipe:
+          title: Auto Trigger Pipeline
+          type: string
+          default: "False"
+          enum: ["True", "False"]
+          description: Automatically trigger a downstream pipeline on completion.
+
+        pipe_name_to_run:
+          title: Pipeline Name to Trigger
+          type: string
+          default: "Pipeline-Name"
+          description: Name of the downstream pipeline to trigger.
+
+        resp_ai_triggered:
+          title: Run Responsible AI
+          type: string
+          default: "False"
+          enum: ["True", "False"]
+          description: Run Responsible AI analysis.
+
+        use_job_container:
+          title: Use Private Pool
+          type: string
+          default: "False"
+          enum: ["True", "False"]
+          description: >
+            Run the pipeline in a private pool.
+            If False, uses the global AKS pool.
+
+        waitForCompletion:
+          title: Wait for Pipeline to Complete?
+          type: boolean
+          default: false
+          description: >
+            If true, Backstage will wait for the pipeline to finish and show
+            the result. This may take a long time for full CI runs.
+
+  steps:
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.ref }}
+
+    - id: run-azure-pipeline
+      name: Run Nexus CI Pipeline
+      action: azure:pipeline:run
+      input:
+        organization: ${{ parameters.organization }}
+        project: ${{ parameters.project }}
+        pipelineId: ${{ parameters.pipelineId }}
+        branch: ${{ parameters.branch }}
+        waitForPipelineCompletion: ${{ parameters.waitForCompletion }}
+        templateParameters:
+          run_quality_tests:                ${{ parameters.run_quality_tests }}
+          run_environment_ci:               ${{ parameters.run_environment_ci }}
+          run_model_governance:             ${{ parameters.run_model_governance }}
+          run_model_ci:                     ${{ parameters.run_model_ci }}
+          run_snowflake_data_preprocessing: ${{ parameters.run_snowflake_data_preprocessing }}
+          run_automl:                       ${{ parameters.run_automl }}
+          run_model_training:               ${{ parameters.run_model_training }}
+          run_model_evaluation:             ${{ parameters.run_model_evaluation }}
+          run_model_prediction:             ${{ parameters.run_model_prediction }}
+          create_pull_request:              ${{ parameters.create_pull_request }}
+          custom_model_action:              ${{ parameters.custom_model_action }}
+          custom_model_name:                ${{ parameters.custom_model_name }}
+          custom_model_version:             ${{ parameters.custom_model_version }}
+          dataset_version:                  ${{ parameters.dataset_version }}
+          data_source:                      ${{ parameters.data_source }}
+          data_asset_pattern:               ${{ parameters.data_asset_pattern }}
+          snowflake_train_timestamp:        ${{ parameters.snowflake_train_timestamp }}
+          snowflake_eval_timestamp:         ${{ parameters.snowflake_eval_timestamp }}
+          snowflake_predict_timestamp:      ${{ parameters.snowflake_predict_timestamp }}
+          snowflake_time_travel:            ${{ parameters.snowflake_time_travel }}
+          auto_start_pipe:                  ${{ parameters.auto_start_pipe }}
+          pipe_name_to_run:                 ${{ parameters.pipe_name_to_run }}
+          resp_ai_triggered:                ${{ parameters.resp_ai_triggered }}
+          use_job_container:                ${{ parameters.use_job_container }}
+          mms_triggered:                    "False"
+
+  output:
+    links:
+      - title: View Pipeline Run in Azure DevOps
+        url: ${{ steps['run-azure-pipeline'].output.pipelineUrl }}
+        icon: dashboard
+    text:
+      - title: Pipeline Result
+        content: ${{ steps['run-azure-pipeline'].output.pipelineResult }}
+      - title: Next Steps
+        icon: settings
+        content: |
+          - Launch the Nexus CD pipeline to deploy the model.
+          - Launch this template  (CD Pipeline - Azure DevOps) on Backstage.

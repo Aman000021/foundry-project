@@ -1,0 +1,14 @@
+id: update-servicenow-request
+action: github:actions:dispatch-with-response
+name: Update ServiceNow Request
+input:
+  repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+  branchOrTagName: main
+  workflowId: update-servicenow-request.yaml
+  waitForActionCompletion: true
+  timeout: 360
+  workflowInputs:
+    ticket: ${{ parameters.servicenow.ticket }}
+    uribase: ${{ parameters.servicenow.uribase }}
+    environment: ${{ parameters.servicenow.environment }}
+    worknotes: ${{ parameters.servicenow.worknotes }}

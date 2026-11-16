@@ -1,0 +1,11 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+- id: github-team-create
+  if: ${{ parameters.createGitHubTeam }}
+  name: Create GitHub Team
+  description: Create a GitHub team for the system.
+  action: github:teams:create
+  input:
+    repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ steps.getEntitiesConfig.output.entities.repoName }}
+    teamName: ${{ parameters.scope }}-${{ parameters.name }}-write
+    maintainers: []
+    members: ${{ parameters.members.concat(parameters.techleads) }}

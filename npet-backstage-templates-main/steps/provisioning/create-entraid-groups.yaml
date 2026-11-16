@@ -1,0 +1,13 @@
+id: entraid-group-create
+action: github:actions:dispatch-with-response
+name: Create EntraID Group(s)
+input:
+  repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+  branchOrTagName: main
+  workflowId: entra-id-group.yaml
+  waitForActionCompletion: true
+  timeout: 360
+  workflowInputs:
+    groupNames: ${{ parameters.groupNames | string }}
+    groupOwners: ${{ parameters.groupOwners | string }}
+    dryRun: ${{ parameters.dryRun }}

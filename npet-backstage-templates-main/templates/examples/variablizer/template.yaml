@@ -1,0 +1,28 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: variablizer
+  title: Variablizer
+  description: Showcases how to create consumable "variables" that can be used in your template.
+  annotations:
+    nestle.com/template-visibility: private
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: examples
+
+  steps:
+    - action: nestle:backstage:variablizer
+      id: variablizer
+      name: Sets Variables
+      input:
+        variables:
+          name: boop
+          myReallyCoolThing: is-pretty-cool
+
+    - action: debug:log
+      name: Output
+      input:
+        message: |
+          name: ${{ steps['variablizer'].output.name }}
+          myReallyCoolThing: ${{ steps['variablizer'].output.myReallyCoolThing }}

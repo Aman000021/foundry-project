@@ -1,0 +1,168 @@
+title: Smanager Data Stores
+required:
+  - cosmosDB
+  - redisCache
+properties:
+  cosmosDB:
+    title: CosmosDB Databases
+    description: |
+      Databases and collections of the cosmosdb-account Resource created on
+      `{name}-smanager` for every environment. The defaults are the standard
+      smanager schema (`smanager` with `users`/`tokens`, `audit` with `events`)
+      and should only be changed when the solution needs extra stores.
+    type: array
+    minItems: 1
+    default:
+      - type: mongodatabase
+        name: smanager
+        maxThroughput: 2000
+        children:
+          - type: mongocollection
+            name: users
+            ttlSeconds: -1
+            shardKey: system
+          - type: mongocollection
+            name: tokens
+            ttlSeconds: -1
+            shardKey: system
+      - type: mongodatabase
+        name: audit
+        maxThroughput: 2000
+        children:
+          - type: mongocollection
+            name: events
+            ttlSeconds: -1
+            shardKey: system
+    items:
+      type: object
+      title: Database
+      required:
+        - name
+        - maxThroughput
+      properties:
+        type:
+          type: string
+          default: mongodatabase
+          ui:widget: hidden
+        name:
+          title: Database Name
+          description: Name of the MongoDB database (e.g., smanager, audit).
+          type: string
+        maxThroughput:
+          title: Max Throughput (RU/s)
+          description: Maximum throughput in Request Units per second (increments of 1000 RU/s).
+          type: number
+          minimum: 1000
+          maximum: 12000
+          multipleOf: 1000
+          default: 2000
+        children:
+          title: Collections
+          description: MongoDB collections within this database.
+          type: array
+          minItems: 1
+          items:
+            title: Collection
+            type: object
+            required:
+              - name
+            properties:
+              type:
+                type: string
+                default: mongocollection
+                ui:widget: hidden
+              name:
+                title: Collection Name
+                description: Name of the MongoDB collection (e.g., users, tokens, events).
+                type: string
+              ttlSeconds:
+                title: Time to Live in Seconds for collection data. -1 Defaults to no TTL.
+                type: number
+                default: -1
+              shardKey:
+                title: Shard Key
+                type: string
+                default: system
+                ui:widget: hidden
+  redisCache:
+    title: Redis Cache Settings
+    description: Settings of the redis-cache Resource created on `{name}-smanager` for every environment.
+    type: object
+    required:
+      - skuName
+      - family
+      - capacity
+    properties:
+      skuName:
+        title: SKU Name
+        type: string
+        default: Basic
+        enum:
+          - Basic
+          - Standard
+          - Premium
+    dependencies:
+      skuName:
+        oneOf:
+          - properties:
+              skuName:
+                const: Basic
+              family:
+                title: Family
+                type: string
+                default: C
+                enum:
+                  - C
+                enumNames:
+                  - Basic/Standard
+          - properties:
+              skuName:
+                const: Standard
+              family:
+                title: Family
+                type: string
+                default: C
+                enum:
+                  - C
+                enumNames:
+                  - Basic/Standard
+          - properties:
+              skuName:
+                const: Premium
+              family:
+                title: Family
+                type: string
+                default: P
+                enum:
+                  - P
+                enumNames:
+                  - Premium
+      family:
+        oneOf:
+          - properties:
+              family:
+                const: C
+              capacity:
+                title: Capacity
+                type: string
+                default: '0'
+                enum:
+                  - '0'
+                  - '1'
+                  - '2'
+                  - '3'
+                  - '4'
+                  - '5'
+                  - '6'
+          - properties:
+              family:
+                const: P
+              capacity:
+                title: Capacity
+                type: string
+                enum:
+                  - '1'
+                  - '2'
+                  - '3'
+                  - '4'
+                  - '5'

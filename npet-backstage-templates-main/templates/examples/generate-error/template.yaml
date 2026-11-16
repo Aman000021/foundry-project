@@ -1,0 +1,20 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: generate-error
+  title: Generate Template Error
+  description: Generates a Scaffolder Template Error
+  annotations:
+    nestle.com/template-visibility: private
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: examples
+
+  steps:
+    - id: fail-if-repo-not-found
+      action: nestle:error
+      name: Fail if Repository Not Found
+      input:
+        error: |
+          Error: GitHub Repository not found

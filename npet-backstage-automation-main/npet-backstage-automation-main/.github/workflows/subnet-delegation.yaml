@@ -1,0 +1,143 @@
+name: Subnet RBAC Assignment
+run-name: Assign RBAC to Subnet [${{ inputs.delegatedSubnetName }}] [${{ inputs.UUID }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      delegatedSubnetName: { type: string, required: true }
+      virtualNetworkName: { type: string, required: true }
+      virtualNetworkRg: { type: string, required: true }
+      subscriptionId: { type: string, required: true }
+      umiPrincipalId: { type: string, required: true }
+      resourceGroupName: { type: string, required: true }
+      systemSlug: { type: string, required: true }
+      organization: { type: string, required: true }
+      CIDR: { type: string, required: true}
+      UUID:
+        description: "UUID of the run"
+        required: false
+        type: string
+        default: "00000000-0000-0000-0000-000000000000"
+
+  workflow_call:
+    inputs:
+      delegatedSubnetName: { type: string, required: true }
+      virtualNetworkName: { type: string, required: true }
+      virtualNetworkRg: { type: string, required: true }
+      subscriptionId: { type: string, required: true }
+      umiPrincipalId: { type: string, required: true }
+      resourceGroupName: { type: string, required: true }
+      systemSlug: { type: string, required: true }
+      organization: { type: string, required: true }
+      CIDR: { type: string, required: true}
+      UUID:
+        description: "UUID of the run"
+        required: false
+        type: string
+        default: "00000000-0000-0000-0000-000000000000"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  subnet_rbac:
+    environment: pr
+    runs-on: [self-hosted, Linux]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ inputs.subscriptionId }}
+          enable-AzPSSession: true
+
+      - name: Assign "Nestle RBAC App Contributor" to subnet
+        shell: pwsh
+        run: |
+          pwsh -command ./.scripts/create-azure-role-assignment.ps1 `
+            -umiPrincipalId "${{ inputs.umiPrincipalId }}" `
+            -virtualNetworkName "${{ inputs.virtualNetworkName }}" `
+            -virtualNetworkRg "${{ inputs.virtualNetworkRg }}"`
+            -delegatedSubnetName "${{ inputs.delegatedSubnetName }}"
+
+
+  commit_catalog:
+    needs: subnet_rbac               
+    runs-on: ubuntu-latest
+    environment: pr                 
+
+    steps:
+      - uses: actions/checkout@v4
+
+
+      - name: Mint GitHub-App token
+        id: gh_app_tok_catalog
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id:      ${{ vars.AUTH_GITHUB_ORG_APP_ID }}
+          private-key: ${{ secrets.AUTH_GITHUB_ORG_PRIVATE_KEY }}
+          owner:       ${{ inputs.organization }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository:  ${{ inputs.organization }}/npet-backstage-catalog
+          path:        catalog
+          token:       ${{ steps.gh_app_tok_catalog.outputs.token }}
+
+      - name: install yq + jq
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y jq
+          curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+
+      - name: YAML Injection - add CIDR
+        shell: bash
+        env:
+          CIDR_INPUT: ${{ inputs.CIDR }}
+          RG_FILE:    catalog/nestle/systems/${{ inputs.systemSlug }}/resources/${{ inputs.resourceGroupName }}.yaml
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$RG_FILE" ]]; then
+            echo "::error::File not found: $RG_FILE"; exit 1
+          fi
+
+          echo "📄 Updating $RG_FILE with nestle.com/CIDR=$CIDR_INPUT"
+
+          yq eval --inplace '
+            .metadata.annotations."nestle.com/CIDR" = strenv(CIDR_INPUT) |
+
+            .metadata.annotations |= (
+              [ to_entries | map(select(.key | test("^nestle\\.com/"))) ,
+                to_entries | map(select(.key | test("^nestle\\.com/") | not)) ]  
+              | flatten
+              | from_entries
+            )
+          ' "$RG_FILE"
+
+          echo "✅ Final Result:"
+          cat "$RG_FILE"
+
+      - name: Commit & push - catalog
+        shell: bash
+        env:
+          RG_FILE_REL: "nestle/systems/${{ inputs.systemSlug }}/resources/${{ inputs.resourceGroupName }}.yaml"
+        run: |
+          set -euo pipefail
+          cd catalog
+          git config user.name  "backstage-bot"
+          git config user.email "backstage-bot-gha@users.noreply.github.com"
+
+          if git diff --quiet -- "$RG_FILE_REL"; then
+            echo "No changes to commit."
+          else
+            git add "$RG_FILE_REL"
+            git commit -m "feat(sharedinfra): add CIDR to ${{ inputs.resourceGroupName }}"
+            git push origin HEAD:main
+          fi
+

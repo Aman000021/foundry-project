@@ -1,0 +1,4 @@
+id: getEntitiesConfig
+name: Get Entities Configuration
+description: Reads the catalog repository location (owner, repoName, repoUrl, branch) from app-config
+action: envs:entities:get

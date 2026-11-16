@@ -1,0 +1,106 @@
+name: Publish TechDocs Site to Azure (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      entity-name:
+        description: 'Name of the Backstage entity (component name)'
+        required: true
+        type: string
+      docs-dir:
+        description: 'Directory containing documentation files'
+        required: false
+        type: string
+        default: 'docs'
+      mkdocs-config:
+        description: 'Path to mkdocs.yml configuration file'
+        required: false
+        type: string
+        default: '.backstage/mkdocs.yml'
+      entity-namespace:
+        description: 'Backstage entity namespace'
+        required: false
+        type: string
+        default: 'default'
+      entity-kind:
+        description: 'Backstage entity kind'
+        required: false
+        type: string
+        default: 'component'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish-techdocs-site:
+    runs-on: naoa-gh-managed-linux-small
+
+    env:
+      ENTITY_NAMESPACE: ${{ inputs.entity-namespace }}
+      ENTITY_KIND: ${{ inputs.entity-kind }}
+      ENTITY_NAME: ${{ inputs.entity-name }}
+      AZURE_STORAGE_ACCOUNT: "glblpridpdevopseuwesta"
+      AZURE_STORAGE_CONTAINER: "glblpridpdevopseuwesta-container"
+      TECHDOCS_AZURE_STORAGE_KEY: ${{ secrets.BACKSTAGE_TECHDOCS_STA_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install Python dependencies
+        run: |
+          python3 --version
+          pip3 --version
+          
+          python3 -m pip install mkdocs-techdocs-core==1.*
+          python3 -m pip install mkdocs-material
+          python3 -m pip install mkdocs-monorepo-plugin
+          
+          which mkdocs || echo "mkdocs not found in PATH"
+          mkdocs --version || echo "mkdocs command failed"
+
+      - name: Install techdocs-cli
+        run: npm install -g @techdocs/cli
+          
+      - name: Generate docs site
+        run: |
+          echo "Using mkdocs config from: ${{ inputs.mkdocs-config }}"
+          echo "Documentation directory: ${{ inputs.docs-dir }}"
+          
+          # Check if mkdocs config exists
+          if [ ! -f "${{ inputs.mkdocs-config }}" ]; then
+            echo "❌ MkDocs configuration file not found: ${{ inputs.mkdocs-config }}"
+            exit 1
+          fi
+          
+          # Check if docs directory exists
+          if [ ! -d "${{ inputs.docs-dir }}" ]; then
+            echo "❌ Documentation directory not found: ${{ inputs.docs-dir }}"
+            exit 1
+          fi
+          
+          echo "Copying mkdocs.yml to root for techdocs-cli..."
+          cp ${{ inputs.mkdocs-config }} ./mkdocs.yml
+          
+          echo "Generating docs with techdocs-cli..."
+          techdocs-cli generate --no-docker --verbose
+          
+          echo "Cleaning up temporary mkdocs.yml..."
+          rm ./mkdocs.yml
+
+      - name: Publish docs site to Azure Storage
+        run: |
+          echo "Publishing documentation for entity: $ENTITY_NAMESPACE/$ENTITY_KIND/$ENTITY_NAME"
+          
+          techdocs-cli publish \
+            --publisher-type azureBlobStorage \
+            --storage-name $AZURE_STORAGE_CONTAINER \
+            --entity $ENTITY_NAMESPACE/$ENTITY_KIND/$ENTITY_NAME \
+            --azureAccountName $AZURE_STORAGE_ACCOUNT \
+            --azureAccountKey $TECHDOCS_AZURE_STORAGE_KEY

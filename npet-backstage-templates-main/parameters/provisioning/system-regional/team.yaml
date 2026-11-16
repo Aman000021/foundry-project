@@ -1,0 +1,26 @@
+title: Technical Team
+properties:
+  createGitHubTeam:
+    title: Should Create a new GitHub Team
+    type: boolean
+    default: true
+    description: If enabled, creates a new GitHub team for the system and grants it write access to the GitOps repository.
+  techleads:
+    title: Tech Leads
+    type: array
+    maxItems: 2
+    default: []
+    description: "Up to 2 tech leads (e.g., john.doe@br.nestle.com)"
+    items:
+      type: string
+      pattern: '^[^@]+@([^@]+\.)?nestle\.com$'
+      errorMessage: Only Nestlé users are accepted.
+  members:
+    title: Members
+    type: array
+    default: []
+    description: "Team member emails (e.g., john.doe@br.nestle.com)"
+    items:
+      type: string
+      pattern: '^[^@]+@([^@]+\.)?nestle\.com$'
+      errorMessage: Only Nestlé users are accepted.

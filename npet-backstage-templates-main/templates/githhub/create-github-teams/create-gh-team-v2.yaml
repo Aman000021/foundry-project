@@ -1,0 +1,273 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: devtest-create-github-teams-v2
+  title: Devtest Create GitHub Team V2
+  description: Devtest Create GitHub team(s) in GitHub and register them in Backstage catalog.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - end-user
+    - github
+spec:
+  owner: group:default/aad-devtest-backstage-glbl-test004-marleixo
+  type: github
+
+  parameters:
+    - title: GitHub Team Parameters
+      required:
+        - parentSystem
+        - teamType
+        - teamName
+        - organization
+        - githubUserVerification
+      ui:order:
+        - parentSystem
+        - teamType
+        - organization
+        - teamName
+        - email
+        - githubUserVerification
+      properties:
+        parentSystem:
+          title: Parent System
+          description: The parent System entity the team(s) will belong to in Backstage.
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+        teamType:
+          title: Team Type to Create
+          type: string
+          default: admin
+          oneOf:
+            - title: Both
+              const: both
+            - title: Write
+              const: write
+            - title: Admin
+              const: admin
+        organization:
+          title: Target Organization
+          type: string
+          default: nestle-devtest
+          oneOf:
+            - title: nestle-devtest
+              const: nestle-devtest
+        teamName:
+          title: Team Name
+          type: string
+          description: |
+            Team segment for the created Teams, all other segments will be derived from the parent System entity. 
+            The final team name will be in the following format:
+
+            Final format: [SCOPE]-**[TEAM-NAME]**-[SOLUTION]-[CONTEXT]-[write/admin]
+        email:
+          title: Maintainer Email
+          type: string
+          description: |
+            The email of the user to add as a member of the created maintainer Teams. Leave empty to use your own.
+          ui:field: ValidateNestleOwners
+        githubUserVerification:
+          title: GitHub Account Status
+          type: string
+          ui:field: GithubUserVerification
+          ui:options:
+            emailField: email
+            
+
+  steps:
+    - id: system-entity
+      action: catalog:get:entity:data
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.parentSystem }}
+
+    - id: variablizer
+      action: nestle:backstage:variablizer
+      name: Calculate Team Name Segments
+      input:
+        variables:
+          organization: ${{ parameters.organization }}
+          resolvedScope: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('scope') }}
+          resolvedSolution: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}
+          resolvedContext: ${{ (steps['system-entity'].output.annotations | parseEntityAnnotations('context')) if steps['system-entity'].output.annotations | parseEntityAnnotations('context') else '' }}
+          maintainerEmail: ${{ parameters.email if parameters.email and parameters.email.trim() else user.entity.spec.profile.email }}
+
+    - id: team-base
+      action: nestle:backstage:variablizer
+      name: Build Base Team Name
+      input:
+        variables:
+          baseTeamName: ${{ (steps['variablizer'].output.resolvedScope + '-' + parameters.teamName + '-' + steps['variablizer'].output.resolvedSolution + (('-' + steps['variablizer'].output.resolvedContext) if steps['variablizer'].output.resolvedContext else '')) | lower }}
+
+    - id: team-names
+      action: nestle:backstage:variablizer
+      name: Build Team Names
+      input:
+        variables:
+          adminTeamName: ${{ steps['team-base'].output.baseTeamName + '-admin' }}
+          writeTeamName: ${{ steps['team-base'].output.baseTeamName + '-write' }}
+
+    # Check 1: Fail if the catalog entity already exists (team already registered)
+    - id: check-admin-entity-exists
+      name: Check if Admin Team Entity Exists
+      action: catalog:get:entity
+      if: ${{ parameters.teamType == 'admin' or parameters.teamType == 'both' }}
+      input:
+        ref: resource:default/${{ steps['team-names'].output.adminTeamName }}
+
+    - id: fail-if-admin-entity-exists
+      action: nestle:error
+      if: ${{ steps['check-admin-entity-exists'].output.exists == true }}
+      name: Fail if Admin Team Entity Already Exists
+      input:
+        error: |
+          Error: The admin team resource "${{ steps['team-names'].output.adminTeamName }}" already exists in the Backstage catalog. The team is already registered.
+
+    - id: check-write-entity-exists
+      name: Check if Write Team Entity Exists
+      action: catalog:get:entity
+      if: ${{ parameters.teamType == 'write' or parameters.teamType == 'both' }}
+      input:
+        ref: resource:default/${{ steps['team-names'].output.writeTeamName }}
+
+    - id: fail-if-write-entity-exists
+      action: nestle:error
+      if: ${{ steps['check-write-entity-exists'].output.exists == true }}
+      name: Fail if Write Team Entity Already Exists
+      input:
+        error: |
+          Error: The write team resource "${{ steps['team-names'].output.writeTeamName }}" already exists in the Backstage catalog. The team is already registered.
+
+    # Check 2: Fail if the GitHub team exists but has no catalog entity (user must use takeover template)
+    - id: check-admin-team-exists
+      name: Check if Admin GitHub Team Exists
+      action: github:teams:get
+      if: ${{ parameters.teamType == 'admin' or parameters.teamType == 'both' }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=npet-backstage-catalog
+        teamSlug: ${{ steps['team-names'].output.adminTeamName }}
+
+    - id: fail-if-admin-team-exists
+      action: nestle:error
+      if: ${{ steps['check-admin-team-exists'].output.exists == true }}
+      name: Fail if Admin GitHub Team Already Exists
+      input:
+        error: |
+          Error: The GitHub team "${{ steps['team-names'].output.adminTeamName }}" already exists in GitHub but is not registered in the catalog. Please use the Take Over Team template instead.
+
+    - id: check-write-team-exists
+      name: Check if Write GitHub Team Exists
+      action: github:teams:get
+      if: ${{ parameters.teamType == 'write' or parameters.teamType == 'both' }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=npet-backstage-catalog
+        teamSlug: ${{ steps['team-names'].output.writeTeamName }}
+
+    - id: fail-if-write-team-exists
+      action: nestle:error
+      if: ${{ steps['check-write-team-exists'].output.exists == true }}
+      name: Fail if Write GitHub Team Already Exists
+      input:
+        error: |
+          Error: The GitHub team "${{ steps['team-names'].output.writeTeamName }}" already exists in GitHub but is not registered in the catalog. Please use the Take Over Team template instead.
+
+    - id: team-list
+      action: nestle:backstage:variablizer
+      name: Select Team List
+      input:
+        variables:
+          teamNames: ${{ [steps['team-names'].output.adminTeamName, steps['team-names'].output.writeTeamName] if parameters.teamType == 'both' else ([steps['team-names'].output.adminTeamName] if parameters.teamType == 'admin' else [steps['team-names'].output.writeTeamName]) }}
+
+    - id: github-team-create
+      action: github:teams:create
+      name: Create GitHub Team(s)
+      each: ${{ steps['team-list'].output.teamNames }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=npet-backstage-catalog
+        maintainers:
+          - ${{ steps['variablizer'].output.maintainerEmail }}
+        teamName: ${{ each.value }}
+
+    - id: create-team-resource-yamls
+      name: Scaffold Team Resource YAMLs for Catalog
+      action: fetch:template:file
+      each: ${{ ['admin', 'write'] if parameters.teamType == 'both' else [parameters.teamType] }}
+      input:
+        url: ../../../.templateable-content/catalog/resource.yaml.njk
+        targetPath: >-
+          ./catalog-content-teams/${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ parameters.parentSystem.split('/')[1] }}/resources/${{ steps['team-base'].output.baseTeamName + '-' + each.value }}.yaml
+        values:
+          name: ${{ steps['team-base'].output.baseTeamName + '-' + each.value }}
+          description: GitHub team with ${{ each.value }} permissions.
+          visibility: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('entity-visibility') if steps['system-entity'].output.annotations | parseEntityAnnotations('entity-visibility') else 'internal' }}
+          type: GitHub Team
+          owner: ${{ steps['system-entity'].output.owner }}
+          domain: ${{ steps['system-entity'].output.domain }}
+          system: ${{ parameters.parentSystem }}
+          annotations:
+            - key: nestle.com/parent-system
+              value: ${{ parameters.parentSystem }}
+            - key: nestle.com/github-organization
+              value: ${{ steps['variablizer'].output.organization }}
+            - key: nestle.com/github-team-slug
+              value: ${{ steps['team-base'].output.baseTeamName + '-' + each.value }}
+            - key: nestle.com/github-team-permission
+              value: ${{ each.value }}
+          links:
+            - url: https://github.com/orgs/${{ steps['variablizer'].output.organization }}/teams/${{ steps['team-base'].output.baseTeamName + '-' + each.value }}
+              title: GitHub Team
+              icon: github
+          tags: ["github", "team", "${{ each.value }}"]
+          dependsOn: []
+          dependencyOf: []
+          resourceProperties: {}
+          resourceTags: {}
+
+    - id: publish-team-resources
+      name: Create Team Resources PR in Catalog Repo
+      action: publish:github:pull-request
+      input:
+        sourcePath: ./catalog-content-teams/${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ parameters.parentSystem.split('/')[1] }}/resources
+        targetPath: ${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ parameters.parentSystem.split('/')[1] }}/resources
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=npet-backstage-catalog
+        branchName: github-teams-${{ steps['team-base'].output.baseTeamName }}
+        title: GitHub Team Resources - ${{ steps['team-base'].output.baseTeamName }}
+        description: Register GitHub team resources for ${{ steps['team-base'].output.baseTeamName }}.
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+    - id: wait-for-pr-merge
+      name: Wait for PR to be Merged
+      action: debug:wait
+      input:
+        seconds: 20
+
+    - id: register-catalog-entities
+      name: Register Team Resources in Catalog
+      action: catalog:register
+      each: ${{ ['admin', 'write'] if parameters.teamType == 'both' else [parameters.teamType] }}
+      input:
+        repoContentsUrl: https://github.com/${{ steps['variablizer'].output.organization }}/npet-backstage-catalog/blob/main
+        catalogInfoPath: /${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ parameters.parentSystem.split('/')[1] }}/resources/${{ steps['team-base'].output.baseTeamName + '-' + each.value }}.yaml
+        optional: false
+
+  output:
+    links:
+      - title: Admin Team
+        if: ${{ parameters.teamType == 'admin' or parameters.teamType == 'both' }}
+        url: https://github.com/orgs/${{ steps['variablizer'].output.organization }}/teams/${{ steps['team-names'].output.adminTeamName }}
+      - title: Write Team
+        if: ${{ parameters.teamType == 'write' or parameters.teamType == 'both' }}
+        url: https://github.com/orgs/${{ steps['variablizer'].output.organization }}/teams/${{ steps['team-names'].output.writeTeamName }}
+      - title: Admin Team in Backstage Catalog
+        if: ${{ parameters.teamType == 'admin' or parameters.teamType == 'both' }}
+        url: /catalog/${{ parameters.parentSystem.split('/')[0].split(':')[1] }}/resource/${{ steps['team-names'].output.adminTeamName }}
+      - title: Write Team in Backstage Catalog
+        if: ${{ parameters.teamType == 'write' or parameters.teamType == 'both' }}
+        url: /catalog/${{ parameters.parentSystem.split('/')[0].split(':')[1] }}/resource/${{ steps['team-names'].output.writeTeamName }}

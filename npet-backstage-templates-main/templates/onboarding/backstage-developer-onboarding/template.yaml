@@ -1,0 +1,222 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+
+metadata:
+  name: backstage-developer-onboarding
+  title: Backstage Developers Onboarding
+  description: >
+    Onboard Backstage users as Template Creators or Backstage Developers by validating their GitHub account, granting the required GitHub access, and creating a corresponding DEV System with the specified Technical Owner.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - onboarding
+    - github
+    - template
+    - end-user
+
+spec:
+  #owner: group:default/aad-backstage-administrators
+  type: onboarding
+
+  parameters:
+    - title: Backstage Developer Onboarding
+      required:
+        - onboardingType
+        - system
+        - UserEmail
+        - githubUserVerification
+        #- writeTeam
+        - technicalowner
+        - technicalOwnerVerification
+
+      properties:
+        onboardingType:
+          title: Onboarding Type
+          type: string
+          default: template-creator
+          enum:
+            - template-creator
+            - developer
+          enumNames:
+            - Template Creator
+            - Backstage Developer
+
+        system:
+          title: Select System
+          description: Select a  System that you own or are authorized to manage.
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+
+        UserEmail:
+          title: User Email
+          description: Enter the Nestlé email address of the user who should be added
+            to the GitHub organization. 
+          type: string
+          format: email
+          ui:options:
+            placeholder: "example: abc.xyz@nestle.com"
+          default: ""
+          pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(?:,[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})*$"
+
+        githubUserVerification:
+          title: GitHub Account Status
+          type: string
+          ui:field: GithubUserVerification
+          ui:options:
+            emailField: UserEmail
+            preventNonNestleUsers: false
+
+        # writeTeam:
+          # title: Select GitHub -write Team from the nestle-it GitHub organization
+          # description: Select a -write team from the nestle-it GitHub organization.
+          # type: string
+          # pattern: '.*-write$'
+          # ui:field: GithubTeamPicker
+
+        technicalowner:
+          title: Technical Owner Email for the dev system
+          description: Enter the Nestlé email address of the Technical Owner for the new development system.
+          type: string
+          format: email
+          ui:options:
+            placeholder: "example: abc.xyz@nestle.com"
+          default: ""
+          pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(?:,[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})*$"
+
+        technicalOwnerVerification:
+          title: Technical Owner GitHub Account Status
+          type: string
+          ui:field: GithubUserVerification
+          ui:options:
+            emailField: technicalowner
+            preventNonNestleUsers: true
+      dependencies:
+        onboardingType:
+          oneOf:
+            - properties:
+                onboardingType:
+                  enum:
+                    - template-creator
+
+            - properties:
+                onboardingType:
+                  enum:
+                    - developer
+
+                writeTeam:
+                  title: Select GitHub -write Team from the nestle-it GitHub organization
+                  description: Select a -write team from the nestle-it GitHub organization.
+                  type: string
+                  pattern: '.*-write$'
+                  ui:field: GithubTeamPicker
+
+              required:
+                - writeTeam
+  
+  steps:
+
+    #
+    # Select System
+    #
+    - id: systemEntity
+      name: System Entity
+      action: catalog:get:entity:data
+      input:
+        ref: ${{ parameters.system }}
+
+    # - id: systemAnnotations
+    #   name: Extract System Annotations
+    #   action: catalog:get:annotations:data
+    #   input:
+    #     annotations: ${{ steps.systemEntity.output.annotations }}
+    #
+    # Add user to GitHub Organization
+    #
+    - id: addToGithubOrg
+      name: Add User to nestle-devtest
+      action: github:org:invite
+      input:
+        repoUrl: github.com?owner=nestle-devtest
+        username: ${{ parameters.githubUserVerification }}
+        role: direct_member
+
+     # Add member to existing team
+    #
+    - id: addMemberTonestle-devtestOrganisationTeam
+      name: Add member to "nestle-devtest" Organisation GitHub team to get write access to "npet-backstage-templates" repository
+      action: github:extras:update:team:members
+      input:
+        repoUrl: github.com?owner=nestle-devtest&repo=npet-backstage-templates
+        team: glbl-backstage-devs-write
+        emails: ${{ parameters.UserEmail }}
+        appendMembers: true
+
+
+    - id: grantWriteAccesstoNpetIdpOrganisationTeam
+      if: ${{ parameters.onboardingType === 'developer' }}
+      name: Grant Write Access to the nestle-it github organization chosen -write team at "npet-idp" Repository . (Skipped for Template Creator Onboarding)
+      action: github:teams:add-team-to-repository
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-idp
+        slug: ${{ parameters.writeTeam }}
+        permission: push
+
+    
+    # Create dev system
+
+    - id: createDevSystem
+      name: Create DEV System
+      action: nestle:system:request-system-creation 
+      input:
+        environment: dv
+        body:
+          u_requester: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/requester') }}
+          entity_visibility: internal
+          system_ownership: self-managed
+          domain: nestle
+          namespace: default
+          solution_name: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/solution-name') }}
+          context: devtest
+          u_tags: ""
+          department: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/department') }}
+          apm_id: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/apm-id') }}
+          functional_owner: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/functional-owner') }}
+          cost_center: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/cost-center') }}
+          cost_plan: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/cost-plan') }}
+          data_classification: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/data-classification') }}
+          pii: false
+          market: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/market') }}
+          technical_owner: ${{ parameters.technicalowner }}
+          financial_owner: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/financial-owner') }}
+          billing_contact: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/billing-contact') }}
+          network: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/network') }}
+          shared_cost: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/shared-cost') }}
+          scope: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/scope') }}
+          location_full_name: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/market-full-name') }}
+          ticket: ${{ steps.systemEntity.output.annotations | parseEntityAnnotations('nestle.com/ticket') }}
+
+
+  output:
+    text:
+      - title: Onboarding Complete
+        content: |
+          PROD System successfully validated.
+
+          GitHub User ID verified.
+
+          User has been added to the **nestle-devtest** GitHub organization.
+
+          User has been added to team:"glbl-backstage-devs-write" of "nestle-devtest" Organisation to get write access to "npet-backstage-templates" repository.
+
+          Write Access granted to the nestle-it github organization chosen -write team at "npet-idp" Repository
+
+          New Dev System created successfully.
+
+    links:
+      - title: GitHub Organization
+        url: https://github.com/nestle-devtest
+    

@@ -1,0 +1,39 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: import-system-from-rg
+  title: Import System From Existing RG
+  description: Create a new system from an existing resource group
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+  - system
+  - entities
+  - create
+  - rg
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: catalog
+  parameters:
+  - $yaml: ../../../parameters/catalog/entity-metadata-common.yaml
+
+  - $yaml: ../../../parameters/catalog/system.yaml
+
+  - $yaml: ../../../parameters/catalog/resource-group.yaml
+
+  steps:
+
+  - $yaml: ../../../steps/github/extras/clone-entities.yaml
+
+  - $yaml: ../../../steps/provisioning/import-rg.yaml
+
+  - $yaml: ../../../steps/provisioning/import-resources.yaml
+
+  - $yaml: ../../../steps/catalog/system.yaml
+
+  - $yaml: ../../../steps/catalog/resource-group.yaml
+
+  - $yaml: ../../../steps/catalog/bulk-resources.yaml
+
+  - $yaml: ../../../steps/github/extras/push-entities.yaml
+

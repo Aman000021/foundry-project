@@ -1,0 +1,14 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+- id: gitops-branch-protection
+  if: ${{ not parameters.gitopsAlreadyExists }}
+  name: Setup GitOps Branch Protection
+  description: Apply branch protection on main of the newly created GitOps repository.
+  action: github:branch-protection:create
+  input:
+    repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ parameters.scope }}-${{ parameters.name }}-gitops
+    branch: main
+    requiredApprovingReviewCount: 1
+    bypassPullRequestAllowances:
+      teams:
+        - nusa-platform-regional-admin
+        - aad-backstage-administrators

@@ -1,0 +1,20 @@
+id: fetch
+action: fetch:template:file
+name: Template Payload
+input:
+  url: ../../../.templateable-content/catalog/system.yaml.njk
+  targetPath: ./${{ parameters.domain | parseEntityRef | pick('name') }}/systems/${{ parameters.name }}/system.yaml
+  values:
+    # Metadata
+    name: ${{ parameters.name }}
+    namespace: ${{ parameters.namespace }}
+    description: ${{ parameters.description }}
+    visibility: ${{ parameters.visibility }}
+    ownership: ${{ parameters.ownership }}
+    annotations: ${{ parameters.annotations }}
+    resourceTags: ${{ steps.getrg.output.resourceGroup.tags }}
+    tags: ${{ parameters.tags }}
+    # System
+    owner: ${{ parameters.owner }}
+    domain:
+      name: ${{ parameters.domain }}

@@ -1,0 +1,347 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: edit-regional-system-template
+  title: Edit Regional Backstage System
+  description: |
+    Edits Regional Systems in Backstage — updates features, tech leads and members.
+
+    The Deployment Target input also migrates an existing AKS System to ARO, one
+    environment at a time. Choosing `Migrate AKS to ARO` does the same thing the
+    creation template does for an ARO System: it labels the base Resource of every
+    selected environment with `cluster-type: aro` and records the target ARO cluster,
+    so the downstream automation moves it off AKS.
+  annotations:
+    nestle.com/template-visibility: private
+    nestle.com/template-scope: regional
+  tags:
+    - entities
+    - edit
+    - regional
+    - aro
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: catalog
+
+  parameters:
+    - title: Update System Parameters
+      required:
+        - name
+        - owner
+        - domain
+        - ownership
+      properties:
+        name:
+          title: Name
+          type: string
+          ui:disabled: true
+        namespace:
+          title: Namespace
+          type: string
+          description: Namespace for your entity.
+          ui:disabled: true
+          ui:widget: hidden
+        annotations:
+          title: Annotations
+          description: Annotations for your entity.
+          type: array
+          ui:disabled: true
+          ui:widget: hidden
+          items:
+            type: object
+            required:
+              - key
+              - value
+            properties:
+              key:
+                title: Key
+                type: string
+              value:
+                title: value
+                type: string
+        owner:
+          title: Owner
+          type: string
+          description: Owner of the Resource.
+          ui:disabled: true
+          ui:widget: hidden
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: [Group, User]
+        domain:
+          title: Parent Domain
+          description: Parent domain of this Resource.
+          ui:disabled: true
+          ui:widget: hidden
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: [Domain]
+        ownership:
+          title: System Ownership
+          type: string
+          description: |
+            End-User ownership model of the System in Backstage:
+
+            * **Fully-Managed**: The team will only have **read** access to their resources in Azure Cloud.
+            * **Self-Managed**: The team will have **read/write** aspects of their resources in Azure Cloud.
+          ui:disabled: true
+          ui:widget: hidden
+          oneOf:
+            - title: Fully-Managed
+              const: fully-managed
+            - title: Self-Managed
+              const: self-managed
+
+    - title: Features, Tech Leads & Members
+      properties:
+        features:
+          title: Select Features
+          type: array
+          items:
+            type: string
+            enum:
+              - notification
+              - metrics
+              - nats
+              - content-delivery
+              - tracing
+            enumNames:
+              - notification
+              - metrics
+              - nats
+              - content-delivery
+              - tracing [BETA]
+          uniqueItems: true
+          ui:widget: checkboxes
+        entity:
+          title: Entity
+          type: string
+          description: Entity reference used to identify the system in the catalog.
+          ui:disabled: true
+          ui:widget: hidden
+        githubTeam:
+          title: GitHub Team
+          type: string
+          description: GitHub team slug associated with this system.
+        techleads:
+          title: Tech Leads
+          type: array
+          maxItems: 3
+          default: []
+          items:
+            type: string
+            pattern: '^[^@]+@[^@]*nestle\.com$'
+            ui:errorMessage: Only Nestlé users are accepted.
+        members:
+          title: Members
+          type: array
+          default: []
+          items:
+            type: string
+            pattern: '^[^@]+@[^@]*nestle\.com$'
+            ui:errorMessage: Only Nestlé users are accepted.
+
+    - $yaml: ../../../parameters/provisioning/system-regional/aro-migration.yaml
+
+  steps:
+    # 1. Guard: only tech leads of THIS system (or regional/global admins) may edit it
+    - id: assertSystemTechlead
+      name: Assert System Tech Lead
+      action: nestle:assert:system-techlead
+      input:
+        systemRef: ${{ parameters.entity }}
+
+    # Resolve the catalog repository location for this environment from app-config
+    - $yaml: ../../../steps/catalog/get-entities-config.yaml
+
+    # 2. Fetch the system BEFORE patching it: the pre-edit annotations feed the
+    #    AAD-sync change detection, and spec.owner names the AAD groups
+    #    (spec.owner is the system's -members group, e.g. group:default/aad[-devtest]-backstage-<scope>-<name>-members;
+    #    Microsoft Graph displayName matching is case-insensitive, so the lowercased ref resolves the real group)
+    - id: fetchSystem
+      name: Fetch System Entity
+      action: catalog:fetch
+      input:
+        entityRef: ${{ parameters.entity }}
+
+    # 3. Clone the catalog entities repository
+    - id: cloneEntities
+      name: Clone Entities Repository
+      action: github:extras:clone
+      input:
+        repoUrl: ${{ steps.getEntitiesConfig.output.entities.repoUrl }}
+        workingDirectory: entities
+
+    # 4. Patch the system YAML with updated annotations
+    - id: merge
+      name: Patch System Entity
+      action: roadiehq:utils:merge
+      input:
+        path: ./entities/${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}/system.yaml
+        content:
+          metadata:
+            annotations:
+              nestle.com/entity-visibility: private
+              br.nestle.com/githubTeam: ${{ parameters.githubTeam }}
+              br.nestle.com/techleads: ${{ parameters.techleads | dump }}
+              br.nestle.com/members: ${{ parameters.members | dump }}
+              br.nestle.com/features: ${{ parameters.features | dump }}
+
+    # 4b. AKS -> ARO migration only: label the base Resource of each selected
+    #     environment with `cluster-type: aro` and record the target ARO cluster — the
+    #     same thing resource-base.yaml writes at creation time. Kept as a separate
+    #     merge so a plain edit never touches it, and environments that were not
+    #     selected keep running on AKS.
+    - id: mergeResourceBaseClusterType
+      name: Label Base Resource for ARO
+      if: ${{ parameters.clusterType == 'aro' }}
+      action: roadiehq:utils:merge
+      each: ${{ parameters.aroEnvironments if parameters.clusterType == 'aro' else [] }}
+      input:
+        path: ./entities/${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}/resources/${{ steps['fetchSystem'].output.entity.metadata.annotations['nestle.com/scope'] }}-${{ each.value }}-base.yaml
+        content:
+          metadata:
+            labels:
+              cluster-type: aro
+            annotations:
+              br.nestle.com/aroCluster: ${{ parameters.aroCluster }}
+
+    # 4c. AKS -> ARO migration only: label the keyvault Resource of each selected
+    #     environment with `cluster-type: aro` and record the target ARO cluster — the
+    #     same thing resource-base.yaml writes at creation time. Kept as a separate
+    #     merge so a plain edit never touches it, and environments that were not
+    #     selected keep running on AKS.
+    - id: mergeResourceKeyvaultClusterType
+      name: Label Keyvault Resource for ARO
+      if: ${{ parameters.clusterType == 'aro' }}
+      action: roadiehq:utils:merge
+      each: ${{ parameters.aroEnvironments if parameters.clusterType == 'aro' else [] }}
+      input:
+        path: ./entities/${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}/resources/${{ steps['fetchSystem'].output.entity.metadata.annotations['nestle.com/scope'] }}-${{ each.value }}-${{ parameters.name | replace('-', '') }}-key.yaml
+        content:
+          metadata:
+            labels:
+              cluster-type: aro
+
+    # 4d. AKS -> ARO migration only: label the UMI Resource of each selected
+    #     environment with `cluster-type: aro` and record the target ARO cluster — the
+    #     same thing resource-base.yaml writes at creation time. Kept as a separate
+    #     merge so a plain edit never touches it, and environments that were not
+    #     selected keep running on AKS.
+    - id: mergeResourceUmiClusterType
+      name: Label UMI Resource for ARO
+      if: ${{ parameters.clusterType == 'aro' }}
+      action: roadiehq:utils:merge
+      each: ${{ parameters.aroEnvironments if parameters.clusterType == 'aro' else [] }}
+      input:
+        path: ./entities/${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}/resources/${{ steps['fetchSystem'].output.entity.metadata.annotations['nestle.com/scope'] }}-${{ each.value }}-${{ parameters.name }}-umi.yaml
+        content:
+          metadata:
+            labels:
+              cluster-type: aro
+
+    # 5. Push the patched entity back to the catalog repo
+    - id: pushEntities
+      name: Push Entity Changes
+      action: github:extras:push
+      input:
+        repoUrl: ${{ steps.getEntitiesConfig.output.entities.repoUrl }}
+        workingDirectory: entities
+        gitAuthorName: ${{ user.entity.metadata.name if user.entity.metadata.name else 'backstage-bot' }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email if user.entity.spec.profile.email else 'backstage-bot@nestle.com' }}
+        gitCommitMessage: "chore: update regional system ${{ parameters.name }} by ${{ user.entity.metadata.name }}"
+
+    # 6. Sync GitHub team membership
+    - id: updateTeamMembers
+      name: Update Team Members in GitHub
+      action: github:extras:update:team:members
+      if: ${{ parameters.githubTeam }}
+      input:
+        repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ steps.getEntitiesConfig.output.entities.repoName }}
+        team: ${{ parameters.githubTeam }}
+        emails: ${{ parameters.members.concat(parameters.techleads) | join(",") }}
+        useToken: true
+
+    # 7. Sync the -techleads AAD group when the tech leads list changed
+    #    (annotations are written with `| dump`, so comparing dumps detects changes;
+    #    a missing/legacy-formatted annotation compares as changed — safe, sync is idempotent)
+    - id: entraidSyncTechleads
+      name: Sync Tech Leads EntraID Group
+      if: ${{ parameters.techleads.length > 0 and (parameters.techleads | dump) != steps['fetchSystem'].output.entity.metadata.annotations['br.nestle.com/techleads'] }}
+      action: github:actions:dispatch-with-response
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+        branchOrTagName: main
+        workflowId: entra-id-group-members.yaml
+        waitForActionCompletion: true
+        timeout: 360
+        workflowInputs:
+          groupName: ${{ steps['fetchSystem'].output.entity.spec.owner.split('/').slice(-1)[0].slice(0, -8) + '-techleads' }}
+          members: ${{ parameters.techleads | join(',') }}
+          mode: sync
+          dryRun: false
+
+    # 8. Sync the -members AAD group (holds members plus tech leads) when either list changed
+    - id: entraidSyncMembers
+      name: Sync Members EntraID Group
+      if: ${{ parameters.members.length + parameters.techleads.length > 0 and ((parameters.members | dump) != steps['fetchSystem'].output.entity.metadata.annotations['br.nestle.com/members'] or (parameters.techleads | dump) != steps['fetchSystem'].output.entity.metadata.annotations['br.nestle.com/techleads']) }}
+      action: github:actions:dispatch-with-response
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+        branchOrTagName: main
+        workflowId: entra-id-group-members.yaml
+        waitForActionCompletion: true
+        timeout: 360
+        workflowInputs:
+          groupName: ${{ steps['fetchSystem'].output.entity.spec.owner.split('/').slice(-1)[0] }}
+          members: ${{ parameters.members.concat(parameters.techleads) | join(',') }}
+          mode: sync
+          dryRun: false
+
+    # 9. Add the tech leads to the regional umbrella AAD group when the list changed
+    #    (additive only — removals are handled by the scheduled reconcile)
+    - id: entraidAddUmbrella
+      name: Add Tech Leads to Regional Umbrella Group
+      if: ${{ parameters.techleads.length > 0 and (parameters.techleads | dump) != steps['fetchSystem'].output.entity.metadata.annotations['br.nestle.com/techleads'] }}
+      action: github:actions:dispatch-with-response
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+        branchOrTagName: main
+        workflowId: entra-id-group-members.yaml
+        waitForActionCompletion: true
+        timeout: 360
+        workflowInputs:
+          groupName: ${{ 'aad-devtest-backstage-regional-techleads' if 'aad-devtest-' in steps['fetchSystem'].output.entity.spec.owner else 'aad-backstage-regional-techleads' }}
+          members: ${{ parameters.techleads | join(',') }}
+          mode: add
+          dryRun: false
+
+    # 10. Add the members to the VDI group AAD group when the list changed
+    #    (additive only — removals are handled by the scheduled reconcile)
+    - id: entraidAddVdiGroup
+      name: Add Members to VDI Group
+      if: ${{ parameters.members.length + parameters.techleads.length > 0 }}
+      action: github:actions:dispatch-with-response
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+        branchOrTagName: main
+        workflowId: entra-id-group-members.yaml
+        waitForActionCompletion: true
+        timeout: 360
+        workflowInputs:
+          groupName: "US: ITInnovationDevelopers"
+          members: ${{ parameters.members.concat(parameters.techleads) | join(',') }}
+          mode: add
+          dryRun: false
+
+  output:
+    text:
+      - title: Summary
+        content: |
+          Regional System **${{ parameters.name }}** updated successfully.
+          - Features: `${{ parameters.features | join(", ") }}`
+          - Tech Leads: `${{ parameters.techleads | join(", ") }}`
+          - Members: `${{ parameters.members | join(", ") }}`
+          - Deployment Target: `${{ 'migrated to ARO on ' + parameters.aroCluster + ' for ' + (parameters.aroEnvironments | join(', ')) if parameters.clusterType == 'aro' else 'unchanged (AKS)' }}`

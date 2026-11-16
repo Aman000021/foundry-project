@@ -1,0 +1,14 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: npet-backstage-automation
+  title: NPET Backstage Automation
+  description: GitHub Actions workflows and scripts for Backstage automation
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    github.com/project-slug: nestle-it/npet-backstage-automation
+spec:
+  type: service
+  lifecycle: experimental
+  owner: AAD-backstage-Administrators
+  system: system:default/idp-devops

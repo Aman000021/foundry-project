@@ -1,0 +1,32 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: ${{ values.name | dump }}
+  {%- if values.description %}
+  description: ${{ values.description | dump }}
+  {%- endif %}
+  annotations:
+    nestle.com/entity-visibility: ${{ values.visibility | dump }}
+    nestle.com/domain: ${{ values.domain | dump }}
+  {%- for a in values.annotations %}
+    ${{ a.key }}: ${{ a.value | dump }}
+  {%- endfor %}
+  {%- if values.tags and values.tags | length %}
+  tags:
+  {%- for a in values.tags %}
+    - ${{ a | lower }}
+  {%- endfor %}
+  {%- endif %}
+spec:
+  type: ${{ values.type | dump }}
+  owner: ${{ values.owner | dump }}
+  {%- if values.system %}
+  system: ${{ values.system | dump }}
+  {%- endif %}
+  {%- if values.dependsOn and values.dependsOn | length %}
+  dependsOn:
+  {%- for d in values.dependsOn %}
+    - ${{ d | dump }}
+  {%- endfor %}
+  {%- endif %}

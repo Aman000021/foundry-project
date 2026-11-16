@@ -1,0 +1,205 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: create-github-template-repository
+  title: Create GitHub Template Repository
+  description: Action to create a GitHub Template Repository
+  annotations:
+    nestle.com/template-visibility: internal
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: examples
+
+  parameters:
+    - title: GitHub Parameters
+      ui:order:
+        - repoUrl
+        - visibility
+        - createGitHubTeam
+        - teamNames
+        - maintainers
+        - environments
+      properties:
+        repoUrl:
+          title: Repository Location
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+            allowedOwners:
+              - nestle-devtest
+              - nestle-it
+        visibility:
+          title: Repository Visibility
+          type: string
+          oneOf:
+            - title: Internal
+              const: internal
+            - title: Private
+              const: private
+        environments:
+          title: Environment(s)
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+              - dv
+              - tst
+              - pp
+              - pr
+          uniqueItems: true
+          ui:widget: checkboxes
+        createGitHubTeam:
+          title: Create a New GitHub Team?
+          type: boolean
+          default: false
+      dependencies:
+        createGitHubTeam:
+          allOf:
+            - if:
+                properties:
+                  createGitHubTeam:
+                    const: true
+              then:
+                properties:
+                  teamNames:
+                    title: GitHub Team Names
+                    type: array
+                    minItems: 1
+                    items:
+                      type: string
+                  maintainers:
+                    title: GitHub Team Maintainers
+                    type: array
+                    minItems: 1
+                    items:
+                      type: string
+                # You can use additional fields of parameters within conditional parameters such as required.
+                required:
+                  - teamNames
+                  - maintainers
+
+  steps:
+    - id: github-team-create
+      action: github:teams:create
+      name: Create GitHub Team(s)
+      if: ${{ parameters.createGitHubTeam }}
+      each: ${{ parameters.teamNames }}
+      input:
+        repoUrl: ${{ parameters.repoUrl }}
+        maintainers: ${{ parameters.maintainers }}
+        teamName: ${{ each.value }}
+    - action: fetch:template
+      id: fetch-template
+      name: Fetch Template Repository
+      input:
+        url: https://github.com/nestle-it/npet-backstage-repository-templates/tree/main/npet-aks-template
+        targetPath: content
+        values:
+          repository: ${{ parameters.repoUrl.split('repo=')[1]}}
+        templateFileExtension: true
+        replace: true
+    - action: fetch:template:file
+      id: fetch-template-workflows-tf-apply
+      name: Fetch Template Workflows - tf-apply
+      each: ${{ parameters.environments }}
+      input:
+        url: https://github.com/nestle-it/npet-backstage-repository-templates/tree/main/npet-aks-template/.github/workflows/env/tf-apply.yml.njk
+        targetPath: content/.github/workflows/${{ each.value }}-tf-apply.yml
+        values:
+          environment: ${{ each.value }}
+        replace: true
+    - action: fetch:template:file
+      id: fetch-template-workflows-tf-destroy
+      name: Fetch Template Workflows - tf-destroy
+      each: ${{ parameters.environments }}
+      input:
+        url: https://github.com/nestle-it/npet-backstage-repository-templates/tree/main/npet-aks-template/.github/workflows/env/tf-destroy.yml.njk
+        targetPath: content/.github/workflows/${{ each.value }}-tf-destroy.yml
+        values:
+          environment: ${{ each.value }}
+        replace: true
+    - action: fetch:template:file
+      id: fetch-template-workflows-tf-plan
+      name: Fetch Template Workflows - tf-plan
+      each: ${{ parameters.environments }}
+      input:
+        url: https://github.com/nestle-it/npet-backstage-repository-templates/tree/main/npet-aks-template/.github/workflows/env/tf-plan.yml.njk
+        targetPath: content/.github/workflows/${{ each.value }}-tf-plan.yml
+        values:
+          environment: ${{ each.value }}
+        replace: true
+    - action: fetch:template
+      id: fetch-template-terraform
+      name: Fetch Template Terraform
+      each: ${{ parameters.environments }}
+      input:
+        url: https://github.com/nestle-it/npet-backstage-repository-templates/tree/main/npet-aks-template/environments/env
+        targetPath: content/environments/${{ each.value }}
+        values: {}
+        templateFileExtension: true
+        replace: true
+    - action: fs:delete
+      id: deleteFiles
+      name: Cleanup Env Directories
+      input:
+        files:
+          - content/.github/workflows/env
+          - content/environments/env
+    - action: publish:github
+      id: github-repository-create
+      name: Create GitHub Template Repository
+      input:
+        repoUrl: ${{ parameters.repoUrl }}
+        sourcePath: content
+        defaultBranch: main
+        description: Templated repository created by Backstage.
+        repoVisibility: ${{ parameters.visibility }}
+        customProperties:
+          # TODO, pull from system annotations.
+          cost-center-id: "beep-1234"
+          apm-id: "boop-5678"
+    - action: github:environment:create
+      name: Create Environment
+      each: ${{ parameters.environments }}
+      input:
+        repoUrl: ${{ parameters.repoUrl }}
+        name: ${{ each.value }}
+    - action: github:branch-protection:create
+      name: Setup Branch Protection
+      input:
+        repoUrl: ${{ parameters.repoUrl }}
+        enforceAdmins: true
+        requiredConversationResolution: true
+        requireCodeOwnerReviews: true
+        requiredApprovingReviewCount: 1
+    # TODO: change to creating the repository secrets from the CPW template.
+    # - action: github:organization-configuration:associate
+    #   name: Associate Organization Secret(s) and Variable(s)
+    #   input:
+    #     repoUrl: ${{ parameters.repoUrl }}
+    #     secretNames:
+    #       - CHECKOV_ACCESS_KEY
+    #       - CHECKOV_SECRET_KEY
+    #       - NPET_REGISTRY_PRIVATE_KEY
+    #     variableNames:
+    #       - NPET_REGISTRY_APPID
+    #       - SONAR_HOST_URL
+    - action: github:teams:add-team-to-repository
+      name: Add GitHub Team(s) to Repository
+      if: ${{ parameters.createGitHubTeam }}
+      each: ${{ parameters.teamNames }}
+      input:
+        slug: ${{ steps['github-team-create'].output.slug[each.key] }}
+        repoUrl: ${{ parameters.repoUrl }}
+
+  output:
+    links:
+      - title: Repository URL
+        url: ${{ steps['github-repository-create'].output.remoteUrl }}
+    text:
+      - title: GitHub Team URL(s)
+        content: "Team URL(s): ${{ steps['github-team-create'].output.teamUrl | dump(2) }}"

@@ -1,0 +1,17 @@
+- id: fetch
+  action: fetch:template:file
+  name: Template Payload
+  input:
+    url: ../../../.templateable-content/catalog/domain.yaml.njk
+    targetPath: ./${{ parameters.name }}/domain.yaml
+    values:
+      # Metadata
+      name: ${{ parameters.name }}
+      namespace: ${{ parameters.namespace }}
+      description: ${{ parameters.description }}
+      visibility: ${{ parameters.visibility }}
+      annotations: ${{ parameters.annotations }}
+      tags: ${{ parameters.tags }}
+      # Domain
+      owner: ${{ parameters.owner }}
+      subdomainOf: ${{ parameters.subdomainOf }}

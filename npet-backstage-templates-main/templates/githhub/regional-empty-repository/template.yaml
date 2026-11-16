@@ -1,0 +1,204 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: regional-empty-repository
+  title: Regional Empty Repository
+  description: |
+    Creates an empty GitHub repository associated with a Regional System.
+
+    Repo names follow this structure:
+
+    **\[SCOPE]-\[SOLUTION]-\[CONTEXT]-\[TITLE]**
+
+    * **SCOPE**: Derived from the selected system (e.g., *nbra*)
+    * **SOLUTION**: Derived from the selected system solution name (e.g., *vendeai*)
+    * **CONTEXT**: Derived from the selected system context (e.g., *vendeai*)
+    * **TITLE**: Repository purpose provided by you (e.g., *my-service*)
+
+    **Example:** `nbra-vendeai-vendeai-my-service`
+
+  annotations:
+    nestle.com/template-visibility: private
+    nestle.com/template-scope: regional
+  tags:
+    - github
+    - repository
+    - regional
+    - end-user
+
+spec:
+  owner: group:default/aad-sg-backstage-ams-admins
+  type: cloud-template
+
+  parameters:
+    - $yaml: ../../../parameters/provisioning/regional-system-picker.yaml
+
+    - title: Repository Details
+      required:
+        - title
+        - description
+        - visibility
+      properties:
+        title:
+          title: Repository Title
+          type: string
+          description: |
+            Purpose segment of the repository name.
+            Final format: [SCOPE]-[SOLUTION]-[CONTEXT]-[TITLE]
+          pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+          ui:help: Lowercase letters, numbers and hyphens only.
+        description:
+          title: Description
+          type: string
+          description: Brief description of the repository's purpose.
+        visibility:
+          title: Repository Visibility
+          type: string
+          default: internal
+          oneOf:
+            - title: Internal (visible to everyone at Nestlé)
+              const: internal
+            - title: Private (visible only to invited users)
+              const: private
+        adminTeamInfo:
+          title: Admin Team
+          type: string
+          default: Captured from system annotation `br.nestle.com/githubAdminTeam`
+          ui:disabled: true
+        writeTeamInfo:
+          title: Write Team
+          type: string
+          default: Captured from system annotation `br.nestle.com/githubTeam`
+          ui:disabled: true
+        hasPipeline:
+          title: Will it use Pipeline
+          type: boolean
+          default: false
+          description: Will the repository use pipeline
+
+  steps:
+    - $yaml: ../../../steps/catalog/assert-system-techlead-create.yaml
+
+    - id: hostname-lookup
+      action: nestle:backstage-hostname-lookup
+      name: Hostname Lookup
+
+    - id: system-entity
+      action: catalog:get:entity:data
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.system }}
+
+    - id: variablizer
+      action: nestle:backstage:variablizer
+      name: Build Variables
+      input:
+        variables:
+          organization: ${{ 'nestle-it' if 'idp.nestle.com' in steps['hostname-lookup'].output.hostname else 'nestle-devtest' }}
+          repoName: >-
+            ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/scope') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/solution-name') | replace('-', '') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/context') | replace('-', '') }}-${{ parameters.title }}
+          githubAdminTeam: >-
+            ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/githubAdminTeam') if steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/githubAdminTeam') else steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/scope') ~ '-' ~ steps['system-entity'].output.name ~ '-admin' }}
+          githubWriteTeam: >-
+            ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/githubTeam') if steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/githubTeam') else steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/scope') ~ '-' ~ steps['system-entity'].output.name ~ '-write' }}
+
+    - id: publish
+      action: publish:github
+      name: Create GitHub Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        defaultBranch: main
+        description: ${{ parameters.description }}
+        repoVisibility: ${{ parameters.visibility }}
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        gitCommitMessage: '[Backstage] Initial commit'
+
+    - id: github-team-associate-admin
+      action: github:teams:add-team-to-repository
+      name: Add Admin Team to Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        slug: ${{ steps['variablizer'].output.githubAdminTeam }}
+        permission: admin
+
+    - id: github-team-associate-write
+      action: github:teams:add-team-to-repository
+      name: Add Write Team to Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        slug: ${{ steps['variablizer'].output.githubWriteTeam }}
+        permission: push
+
+    - id: github-team-associate-platform-admin
+      action: github:teams:add-team-to-repository
+      name: Add Platform Admin Team to Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        slug: br-nbra-platform-admin
+        permission: admin
+
+    - id: github-team-associate-platform-write
+      action: github:teams:add-team-to-repository
+      name: Add Platform Write Team to Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        slug: br-nbra-platform-write
+        permission: push
+
+    - id: branch-protection
+      action: github:branch-protection:create
+      name: Setup Branch Protection
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        branch: main
+        requiredApprovingReviewCount: 1
+
+    - id: catalog-repository-resource
+      action: roadiehq:utils:fs:write
+      name: Write Repository Resource Entity
+      if: ${{ parameters.hasPipeline }}
+      input:
+        path: ./catalog-content/${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/resources/${{ steps['variablizer'].output.repoName }}-repo.yaml
+        content: |-
+          apiVersion: backstage.io/v1alpha1
+          kind: Resource
+          metadata:
+            name: ${{ steps['variablizer'].output.repoName }}-repo
+            namespace: ${{ steps['system-entity'].output.name }}
+            description: Repository for ${{ steps['variablizer'].output.repoName }}
+            annotations:
+              nestle.com/entity-visibility: internal
+              nestle.com/system-type: regional
+              nestle.com/domain: ${{ steps['system-entity'].output.domain.split('/')[1] }}
+              nestle.com/repo-url: git@github.com:${{ steps['variablizer'].output.organization }}/${{ steps['variablizer'].output.repoName }}.git
+              br.nestle.com/domain: ${{ steps['system-entity'].output.domain.split('/')[1] }}
+              br.nestle.com/repoUrl: git@github.com:${{ steps['variablizer'].output.organization }}/${{ steps['variablizer'].output.repoName }}.git
+          spec:
+            type: repository
+            owner: ${{ steps['system-entity'].output.owner }}
+            system: ${{ parameters.system }}
+
+    - id: publish-catalog
+      action: publish:github:pull-request
+      name: Create Catalog Pull Request
+      if: ${{ parameters.hasPipeline }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=npet-backstage-catalog
+        sourcePath: ./catalog-content/${{ steps['system-entity'].output.domain.split('/')[1] }}
+        targetPath: ${{ steps['system-entity'].output.domain.split('/')[1] }}
+        branchName: add-repo-${{ steps['variablizer'].output.repoName }}
+        title: "Add Repository Resource - ${{ steps['variablizer'].output.repoName }}"
+        description: "Register repository ${{ steps['variablizer'].output.repoName }} as a Resource entity in the catalog"
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+  output:
+    links:
+      - title: Repository
+        url: ${{ steps['publish'].output.remoteUrl }}
+      - title: Catalog Pull Request
+        url: ${{ steps['publish-catalog'].output.remoteUrl }}
+        if: ${{ parameters.hasPipeline }}

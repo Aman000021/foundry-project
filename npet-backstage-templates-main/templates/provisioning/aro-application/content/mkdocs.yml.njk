@@ -1,0 +1,14 @@
+site_name: '${{ values.name | title }}'
+site_description: 'Documentation for ${{ values.name }} - ${{ values.templateType | title }} Template'
+
+# Point to the docs directory for source files
+docs_dir: 'docs'
+
+# Output to site directory in root
+site_dir: 'site'
+
+nav:
+  - Home: index.md
+
+plugins:
+  - techdocs-core

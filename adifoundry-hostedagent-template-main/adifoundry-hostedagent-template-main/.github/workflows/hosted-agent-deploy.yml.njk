@@ -1,0 +1,98 @@
+name: Deploy Hosted Agent
+
+on:
+  workflow_call:
+    inputs:
+      appName:
+        description: Name of usecase
+        type: string
+        required: true
+      environment:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  build-hosted-agent-image:
+    runs-on: ${{ values.runner | dump }}
+    environment: ${{ inputs.environment }}
+    env:
+      ARM_TENANT_ID: ${{ vars.TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars.CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      #Login to ACR
+      - name: ACR login
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Docker Build
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context: sample-agent/hosted-agent
+          file: sample-agent/hosted-agent/Dockerfile
+          push: true
+          tags: |
+            ${{ vars.ACR_NAME }}.azurecr.io/${{ inputs.appName }}/hosted-agent-image:${{ inputs.environment }}-latest
+            ${{ vars.ACR_NAME }}.azurecr.io/${{ inputs.appName }}/hosted-agent-image:${{ github.sha }}
+  
+  deploy-hosted-agent:
+    runs-on: ${{ values.runner | dump }}
+    environment: ${{ inputs.environment }}
+    needs: [build-hosted-agent-image]
+    env:
+      ARM_TENANT_ID: ${{ vars.TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars.CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
+    defaults:
+      run:
+        working-directory: sample-agent/deploy
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Register Hosted Agent version
+        env:
+          FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
+          AGENT_NAME: ${{ vars.AGENT_NAME }}
+          ACR_LOGIN_SERVER: ${{ vars.ACR_NAME }}.azurecr.io
+          AGENT_IMAGE: ${{ inputs.appName }}/hosted-agent-image:${{ inputs.environment }}-latest
+          AGENT_CPU: "1"
+          AGENT_MEMORY: 2Gi
+          # NESTLE_MODEL_DEPLOYMENT: gpt-4o
+          OTEL_RESOURCE_ATTRIBUTES: ${{ vars.OTEL_RESOURCE_ATTRIBUTES }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${{ vars.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT }}
+          ENABLE_MESSAGE_EVENTS: ${{ vars.ENABLE_MESSAGE_EVENTS }}
+          ENABLE_SENSITIVE_DATA: ${{ vars.ENABLE_SENSITIVE_DATA }}
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install -r requirements.txt
+          python register_agent.py
+      

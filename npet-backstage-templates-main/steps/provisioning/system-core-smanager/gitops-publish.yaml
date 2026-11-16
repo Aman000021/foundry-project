@@ -1,0 +1,26 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+- id: gitops-publish-core
+  if: ${{ not parameters.gitopsAlreadyExists }}
+  name: Publish Core GitOps Repository
+  description: Create the GitOps repository of the core System on GitHub and push the templated content.
+  action: publish:github
+  input:
+    repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ parameters.scope }}-${{ parameters.name }}-core-gitops
+    sourcePath: ./gitops
+    defaultBranch: main
+    gitAuthorName: ${{ user.entity.metadata.name }}
+    gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+    gitCommitMessage: 'created by backstage'
+
+- id: gitops-publish-smanager
+  if: ${{ not parameters.gitopsAlreadyExists }}
+  name: Publish Smanager GitOps Repository
+  description: Create the GitOps repository of the smanager System on GitHub and push the templated content.
+  action: publish:github
+  input:
+    repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ parameters.scope }}-${{ parameters.name }}-smanager-gitops
+    sourcePath: ./gitops
+    defaultBranch: main
+    gitAuthorName: ${{ user.entity.metadata.name }}
+    gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+    gitCommitMessage: 'created by backstage'

@@ -1,0 +1,34 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: subnet-get-api
+  title: IAC-API - Subnet get
+  description: Subnet Metadata Lookup
+  annotations:
+    nestle.com/template-visibility: private
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: examples
+
+  parameters:
+    - title: Parameters
+      required:
+        - resourcegroup
+      properties:
+        resourcegroup:
+          title: ResourceGroup
+          type: string
+
+  steps:
+    - id: subnet-get-api
+      action: nestle:subnet-get
+      name: VNET Lookup API
+      input:
+        resourcegroup: ${{ parameters.resourcegroup }}
+    - action: debug:log
+      id: write-debug-line
+      name: Output Entity data
+      input:
+        message: |
+          Subnet: ${{ steps['subnet-get-api'].output.subnet }}

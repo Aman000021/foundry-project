@@ -1,0 +1,81 @@
+name: Azure EntraID Group Management
+run-name: EntraID - [${{ inputs.UUID }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      groupNames: { type: string, required: true }
+      groupOwners: { type: string, required: true }
+      dryRun: { type: boolean, required: false, default: false }
+      UUID:
+        required: false
+        type: string
+        default: "00000000-0000-0000-0000-000000000000"
+  workflow_call:
+    inputs:
+      groupNames: { type: string, required: true }
+      groupOwners: { type: string, required: true }
+      dryRun: { type: boolean, required: false, default: false }
+      UUID:
+        required: false
+        type: string
+        default: "00000000-0000-0000-0000-000000000000"
+
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  create_entra_id_group:
+    environment: pr #dv
+    runs-on: ubuntu-latest #[self-hosted, Linux, X64]
+    name: Create EntraID Group
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Setup PowerShell module cache
+        id: cacher
+        uses: actions/cache@v4
+        with:
+          path: "~/.local/share/powershell/Modules"
+          key: ${{ runner.os }}-Microsoft-Entra-AZ-Accounts
+
+      - name: Install PSScriptAnalyzer module
+        if: steps.cacher.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Microsoft.Entra -RequiredVersion 1.0.6 -ErrorAction Stop
+          Install-Module -Name Az.Accounts -RequiredVersion 4.1.0 -ErrorAction Stop
+
+      - name: Authenticate to Azure using Service Principal
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          allow-no-subscriptions: true
+          enable-AzPSSession: true
+
+      - name: Fetch Azure Tenant
+        id: set-env
+        uses: nestle-it/gha-npet/gha-tenantenv@v0.0.1
+        with:
+          tenant: NestlePROD
+
+      - name: Create EntraID Group - DryRun
+        if: ${{ inputs.dryRun == true }}
+        shell: pwsh
+        run: |
+          pwsh -command ./.scripts/create-entra-id-group.ps1 `
+            -groupNames "${{ inputs.groupNames }}" `
+            -groupOwners "${{ inputs.groupOwners }}" `
+            -dryRun
+
+      - name: Create EntraID Group
+        if: ${{ inputs.dryRun == false }}
+        shell: pwsh
+        run: |
+          pwsh -command ./.scripts/create-entra-id-group.ps1 `
+            -groupNames "${{ inputs.groupNames }}" `
+            -groupOwners "${{ inputs.groupOwners }}"

@@ -1,0 +1,73 @@
+title: Environments and Azure Resources
+required:
+  - environments
+properties:
+  environments:
+    title: Environments
+    description: |
+      Per-environment configuration. At least one environment is required.
+      Every environment gets a full set of Resources on both Systems: base,
+      key-vault and user-assigned-managed-identity on each, plus
+      kubernetes-cluster and registry on `{name}-core` and cosmosdb-account,
+      redis-cache and strongpassword on `{name}-smanager`.
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: object
+      required:
+        - name
+        - subscription
+        - resourceGroup
+        - aksSubnetId
+      properties:
+        name:
+          title: Environment
+          type: string
+          enum:
+            - dv
+            - ts
+            - np
+            - pp
+            - pr
+          enumNames:
+            - Development (dv)
+            - Test (ts)
+            - Non-Production (np)
+            - Pre-Production (pp)
+            - Production (pr)
+        subscription:
+          title: Subscription
+          type: string
+          description: "Azure subscription for this environment (e.g., nams-np-researchanddevelopment-001-sub)"
+          pattern: '^[a-z]{4}-(np|pr)-[a-z0-9]+-[0-9]{3}-sub$'
+          errorMessage: "Must be a valid subscription name: <scope>-<np|pr>-<department>-<nnn>-sub"
+        resourceGroup:
+          title: Resource Group
+          type: string
+          description: "Azure Resource Group name (e.g., nams-dv-idpplayground-usea-rgp)"
+        appSecurityGroup:
+          title: App Security Group
+          type: string
+          description: "Azure App Security Group name (optional, e.g., nams-dv-idpplayground-usea-asg)"
+        subnetId:
+          title: Subnet ID
+          type: string
+          description: "Azure Subnet resource ID used by the base Resource of both Systems (optional)"
+          pattern: '^/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/resourceGroups/[^/]+/providers/Microsoft\.Network/virtualNetworks/[^/]+/subnets/[^/]+$'
+          ui:options:
+            inputProps:
+              placeholder: /subscriptions/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/resourceGroups/.../providers/Microsoft.Network/virtualNetworks/.../subnets/...
+          errorMessage: "Must be a valid Azure subnet resource ID: /subscriptions/<guid>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<subnet>"
+        aksSubnetId:
+          title: AKS Subnet ID
+          type: string
+          description: |
+            Azure Subnet resource ID the AKS cluster of `{name}-core` is placed in.
+            This is the dedicated `fd.aks` subnet, not the general subnet above
+            (e.g., .../subnets/nams-dv-idpplayground-usea-fd.aks.rd.snt).
+          pattern: '^/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/resourceGroups/[^/]+/providers/Microsoft\.Network/virtualNetworks/[^/]+/subnets/[^/]+$'
+          ui:options:
+            inputProps:
+              placeholder: /subscriptions/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/resourceGroups/.../providers/Microsoft.Network/virtualNetworks/.../subnets/...-fd.aks....snt
+          errorMessage: "Must be a valid Azure subnet resource ID: /subscriptions/<guid>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<subnet>"

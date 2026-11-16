@@ -1,0 +1,7 @@
+environment_name                = "dv"
+solution_name = "agentservice"
+resource_group_name             = "glbl-dv-adifoundrydev02-adi-euwe-rgp"
+shared_subnet_name              = "emna-np-g-adi-euwe-002-snt"
+# segment = "dev02"
+#storage_container_name = "foundry"
+#storage_account = "glbldvadifoundrysta"

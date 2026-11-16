@@ -1,0 +1,45 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: ${{ values.name | dump }}
+  {%- if values.namespace %}
+  namespace: ${{ values.namespace | dump }}
+  {%- endif %}
+  {%- if values.description %}
+  description: ${{ values.description | dump }}
+  {%- endif %}
+  annotations:
+    nestle.com/entity-visibility: ${{ values.visibility }}
+  {%- for a in values.annotations %}
+    ${{ a.key }}: ${{ a.value }}
+  {%- endfor %}
+  {%- if values.tags | length %}
+  tags:
+  {%- for a in values.tags %}
+    - ${{ a | lower }}
+  {%- endfor %}
+  {%- endif %}
+spec:
+  type: ${{ values.type | dump }}
+  profile:
+    displayName: ${{ values.name }}
+  {%- if values.parent %}
+  parent: ${{ values.parent | dump }}
+  {%- endif %}
+  {%- if values.children | length %}
+  children:
+  {%- for c in values.children %}
+  - ${{ c }}
+  {%- endfor %}
+  {%- else %}
+  children: []
+  {%- endif %}
+  {%- if values.members | length %}
+  members:
+  {%- for m in values.members %}
+  - ${{ m }}
+  {%- endfor %}
+  {%- else %}
+  members: []
+  {%- endif %}

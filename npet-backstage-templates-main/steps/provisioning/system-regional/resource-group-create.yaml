@@ -1,0 +1,76 @@
+# Creates the Resource Group of every environment with `createResourceGroup` enabled,
+# then resolves each environment's resourceGroup/subscription/subnetId into
+# steps['resolve-environments'].output.environment — the list the system, base and
+# keyvault steps read instead of parameters.environments.
+#
+# Iterations skipped by `if` push no output, so the pipeline and VNET lookup outputs
+# only hold the environments that created a Resource Group. The index of an
+# environment in those outputs is the number of environments before it that also
+# create one: (parameters.environments.slice(0, each.key) | selectattr('createResourceGroup') | length).
+- id: resource-group-create
+  if: ${{ each.value.createResourceGroup }}
+  name: Create Resource Group
+  description: Run the Resource Group Azure DevOps pipeline for each environment that creates its Resource Group.
+  each: ${{ parameters.environments }}
+  action: azure:pipeline:run:resource-group
+  input:
+    organization: nestle-it
+    project: STIG
+    branch: master
+    pipelineId: 147
+    pipelineParameters:
+      apm_id: ${{ parameters.apmId | default('') }}
+      billing_contact: ${{ parameters.billingContact | default('') }}
+      context: ${{ parameters.name.split('-')[1] }}
+      cost_center: ${{ parameters.costCenter | default('') }}
+      data_classification: ${{ parameters.dataClassification }}
+      department: ${{ parameters.department }}
+      financial_owner: ${{ parameters.financialOwner | default('') }}
+      functional_owner: ${{ parameters.functionalOwner }}
+      market: ${{ parameters.market }}
+      network: ${{ parameters.network | default('') }}
+      pii: ${{ parameters.pii }}
+      scope: ${{ parameters.scope }}
+      shared_cost: ${{ parameters.sharedCost | default('') }}
+      solution_name: ${{ parameters.name.split('-')[0] }}
+      technical_owner: ${{ parameters.technicalOwner }}
+      ticket: ${{ parameters.ticket | default('') }}
+      location_full_name: ${{ parameters.marketFullName | default('') }}
+      region: ${{ parameters.region }}
+      tenant: ${{ parameters.tenant }}
+      u_requester: ${{ parameters.requester }}
+      development: ${{ each.value.name == 'dv' }}
+      test: ${{ each.value.name == 'ts' }}
+      nonproduction: ${{ each.value.name == 'np' }}
+      preproduction: ${{ each.value.name == 'pp' }}
+      production: ${{ each.value.name == 'pr' }}
+    waitForPipelineCompletion: true
+    artifact:
+      artifactName: "ResourceGroupTemplatesFinal"
+      fileNamePattern: "-roles-parameters.json"
+
+- id: resource-group-vnet-lookup
+  if: ${{ each.value.createResourceGroup }}
+  name: VNET Lookup API
+  description: Look up the VNET of the subscription each created Resource Group landed in.
+  each: ${{ parameters.environments }}
+  action: nestle:vnet-lookup
+  input:
+    subscription: ${{ steps['resource-group-create'].output.artifactOutput[(parameters.environments.slice(0, each.key) | selectattr('createResourceGroup') | length)].subscriptionName }}
+
+# No `if`: runs once per environment, so output.environment[each.key] lines up with
+# parameters.environments in the steps that follow.
+- id: resolve-environments
+  name: Resolve Environments
+  description: Merge the created Resource Groups into the environment list.
+  each: ${{ parameters.environments }}
+  action: nestle:backstage:variablizer
+  input:
+    variables:
+      environment:
+        name: ${{ each.value.name }}
+        subscription: ${{ steps['resource-group-create'].output.artifactOutput[(parameters.environments.slice(0, each.key) | selectattr('createResourceGroup') | length)].subscriptionName if each.value.createResourceGroup else each.value.subscription }}
+        resourceGroup: ${{ steps['resource-group-create'].output.artifactOutput[(parameters.environments.slice(0, each.key) | selectattr('createResourceGroup') | length)].resourceGroupName if each.value.createResourceGroup else each.value.resourceGroup }}
+        appSecurityGroup: ${{ each.value.appSecurityGroup }}
+        # Private endpoint subnet of the created Resource Group, in the subscription VNET.
+        subnetId: ${{ ('/subscriptions/' + steps['resource-group-vnet-lookup'].output.subscriptionId[(parameters.environments.slice(0, each.key) | selectattr('createResourceGroup') | length)] + '/resourceGroups/' + steps['resource-group-vnet-lookup'].output.resourceGroup[(parameters.environments.slice(0, each.key) | selectattr('createResourceGroup') | length)] + '/providers/Microsoft.Network/virtualNetworks/' + steps['resource-group-vnet-lookup'].output.vnet[(parameters.environments.slice(0, each.key) | selectattr('createResourceGroup') | length)] + '/subnets/' + steps['resource-group-create'].output.artifactOutput[(parameters.environments.slice(0, each.key) | selectattr('createResourceGroup') | length)].pepSubnetName) if each.value.createResourceGroup else each.value.subnetId }}

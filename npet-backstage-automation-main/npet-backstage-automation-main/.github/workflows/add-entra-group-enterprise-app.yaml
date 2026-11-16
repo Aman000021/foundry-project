@@ -1,0 +1,77 @@
+name: Add Entra Group to Enterprise App
+run-name: Add Entra Group to Enterprise App - [${{ inputs.UUID }}]
+on:
+  workflow_dispatch:
+    inputs:
+      GroupId:
+        description: 'Azure AD Group Object ID'
+        type: string
+        required: true
+      EnterpriseAppObjectId:
+        description: 'Enterprise App Object ID'
+        type: string
+        required: true
+      AppRoleId:
+        description: 'App Role ID'
+        type: string
+        required: true
+      UUID:
+        description: 'UUID of the run'
+        type: string
+        required: false
+        default: "00000000-0000-0000-0000-000000000000"
+
+  workflow_call:
+    inputs:
+      GroupId: { type: string, required: true }
+      EnterpriseAppObjectId: { type: string, required: true }
+      AppRoleId: { type: string, required: true }
+      UUID:
+        {
+          type: string,
+          required: false,
+          default: "00000000-0000-0000-0000-000000000000",
+        }
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  add-group:
+    environment: pr #dv
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Setup PowerShell module cache
+        id: cacher
+        uses: actions/cache@v4
+        with:
+          path: "~/.local/share/powershell/Modules"
+          key: ${{ runner.os }}-Microsoft-Entra-AZ-Accounts
+
+      - name: Install PowerShell modules
+        if: steps.cacher.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Microsoft.Graph.Applications -ErrorAction Stop
+          Install-Module -Name Az.Accounts -RequiredVersion 4.1.0 -ErrorAction Stop
+        
+      - name: Authenticate to Azure using Service Principal
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          allow-no-subscriptions: true
+          enable-AzPSSession: true        
+
+      - name: Run add-entra-group-enterprise-app.ps1
+        shell: pwsh
+        run: |
+          ./.scripts/add-entra-group-enterprise-app.ps1 `
+            -GroupId "${{ github.event.inputs.GroupId || inputs.GroupId }}" `
+            -EnterpriseAppObjectId "${{ github.event.inputs.EnterpriseAppObjectId || inputs.EnterpriseAppObjectId }}" `
+            -AppRoleId "${{ github.event.inputs.AppRoleId || inputs.AppRoleId }}"

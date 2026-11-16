@@ -1,0 +1,51 @@
+# Github Workflows
+This folder contains files that GitHub uses to run CI/CD (referred to as Actions or Workflows). The workflows are typically used for infrastructure deployments, code deployment.
+
+## Workflows
+The workflows are designed to deploy infrastructure as well as code at the same time. This provides an IaC way of working in case any changes are made to code as well as infrastructure the changes will automatically be deployed together.
+To keep the workflows condensed into one single workflow we have decided to keep the workflows in a repository of their own.
+This does not stop you from creating your own workflows and implementing them within this repository.
+
+To correctly configure the workflow you will need to change the environments that are being used. 
+To do this all you need to do in the code is match the environment environment: 'dv' to the environments that you chose. It is also a good idea to change the options to the environments that were chosen as well.
+
+## Overview
+
+Workflows are located under `.github/workflows` and are responsible for:
+
+- Build hosted agent image
+- Deploy hosted agent in foundry project
+
+---
+
+## Available Workflows (Aligned with Repo)
+
+- agent.yaml 
+  User inputs to select environment to deploy the agent
+
+- hosted-agent-deploy.yml  
+  Deploys hosted agent in foundry project
+
+---
+
+## Environment Configuration
+
+Workflows use GitHub Environments (e.g., dv).
+
+To configure:
+- Update the `environment` field in workflow files (example: dv)
+- Ensure the same environment exists in GitHub Settings
+
+---
+
+## Manual Execution (GitHub UI)
+
+You can manually trigger workflows:
+
+1. Go to **GitHub Repository**
+2. Click **Actions**
+3. Select **Build Hosted Agent Image** workflow and click **Run workflow**
+4. Select a environment
+5. Click **Run**
+
+---

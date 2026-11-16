@@ -1,0 +1,59 @@
+# This is a sample on how to deploy both infrastructure as well as code.  This workflow calls a separate workflow from a different repository
+# To make sure you deploy the correct environments change the default environments to your personal environments
+# For example if you have environments (dv, np, pr) change the environment: 'ts' to 'np' as well as 'pp' to 'pr'
+name: Build Hosted Agent Image
+
+on:
+  # pull_request:
+  #   branches:
+    #   - main
+   
+    workflow_dispatch:
+      inputs:
+        appName:
+          description: Name of usecase
+          type: string
+          required: true
+        choice:
+          description: 'Environments'
+          required: false
+          type: choice
+          default: 'dv'
+          options:
+              - dv
+              - pp
+              - pr
+
+permissions:
+    id-token: write
+    contents: read
+    issues: write
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+     Dev-Agent-Deploy:
+         if: ${{ github.event.inputs.choice == 'dv' }}
+         uses: ./.github/workflows/hosted-agent-deploy.yml
+         with: 
+             environment: 'dv'
+             appName: ${{ inputs.appName }}
+         secrets: inherit
+
+     Preprod-Agent-Deploy: 
+        if: ${{ github.event.inputs.choice == 'pp' }}
+        uses: ./.github/workflows/hosted-agent-deploy.yml
+        with:
+            environment: 'pp'
+            appName: ${{ inputs.appName }}
+        secrets: inherit
+    
+     Prod-Agent-Deploy:
+        if: ${{ github.event.inputs.choice == 'pr' }}
+        uses: ./.github/workflows/hosted-agent-deploy.yml
+        with: 
+            environment: 'pr'
+            appName: ${{ inputs.appName }}
+        secrets: inherit

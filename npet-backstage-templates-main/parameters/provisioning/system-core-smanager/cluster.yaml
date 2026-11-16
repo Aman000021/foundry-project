@@ -1,0 +1,118 @@
+title: Core Cluster (AKS) and Registry
+required:
+  - aks
+properties:
+  aks:
+    title: AKS Cluster Settings
+    description: |
+      Settings of the kubernetes-cluster Resource created on `{name}-core` for
+      every environment. The cluster is named `{scope}-{env}-{name}-core-aks`
+      and is the cluster both Systems are annotated with.
+    type: object
+    required:
+      - kubernetesVersion
+      - skuTier
+      - nodePool
+      - istio
+      - admins
+    properties:
+      kubernetesVersion:
+        title: Kubernetes Version
+        type: string
+        default: 1.35.3
+        description: "Kubernetes version of the cluster and of its default node pool (e.g., 1.35.3)"
+        pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+        errorMessage: Must be a semantic version (e.g., 1.35.3).
+      skuTier:
+        title: SKU Tier
+        type: string
+        default: Standard
+        enum:
+          - Free
+          - Standard
+          - Premium
+      nodePool:
+        title: Default Node Pool
+        type: object
+        required:
+          - vmSize
+          - osDiskSizeGb
+          - osDiskType
+          - minCount
+          - maxCount
+        properties:
+          vmSize:
+            title: VM Size
+            type: string
+            default: Standard_DS3_v2
+            enum:
+              - Standard_DS3_v2
+              - Standard_DS4_v2
+              - Standard_D4s_v3
+              - Standard_D8s_v3
+          osDiskSizeGb:
+            title: OS Disk Size (GB)
+            type: number
+            default: 128
+            minimum: 30
+            maximum: 1024
+          osDiskType:
+            title: OS Disk Type
+            type: string
+            default: Ephemeral
+            enum:
+              - Ephemeral
+              - Managed
+          minCount:
+            title: Minimum Node Count
+            type: number
+            default: 2
+            minimum: 1
+            maximum: 50
+          maxCount:
+            title: Maximum Node Count
+            type: number
+            default: 15
+            minimum: 1
+            maximum: 100
+      istio:
+        title: Istio Service Mesh
+        type: object
+        required:
+          - enabled
+          - revision
+          - externalIngressGatewayEnabled
+          - internalIngressGatewayEnabled
+        properties:
+          enabled:
+            title: Enabled
+            type: boolean
+            default: true
+          revision:
+            title: ASM Revision
+            type: string
+            default: asm-1-30
+            description: "Azure Service Mesh revision (e.g., asm-1-30)"
+            pattern: '^asm-[0-9]+-[0-9]+$'
+            errorMessage: Must be an ASM revision (e.g., asm-1-30).
+          externalIngressGatewayEnabled:
+            title: External Ingress Gateway
+            type: boolean
+            default: false
+          internalIngressGatewayEnabled:
+            title: Internal Ingress Gateway
+            type: boolean
+            default: true
+      admins:
+        title: Cluster Admin Object IDs
+        description: EntraID object IDs granted cluster-admin. Defaults to the platform administrator groups.
+        type: array
+        minItems: 1
+        uniqueItems: true
+        default:
+          - d678c51d-845f-484c-aa15-fbefd0854909
+          - afdbc368-7128-42a2-a554-19226ea27601
+        items:
+          type: string
+          pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          errorMessage: Must be an EntraID object ID (GUID).

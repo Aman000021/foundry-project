@@ -1,0 +1,80 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: create-python-gha-template-repository
+  title: Create Python GHA Template Repository
+  description: Create a Python GitHub Actions template repository
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - end-user
+    - github
+    - python
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: github
+
+  parameters:
+    - title: GitHub Parameters
+      ui:order:
+        - repoName
+        - visibility
+      properties:
+        repoName:
+          title: Repository Name
+          type: string
+          description: The name of the Python GHA repository
+          ui:autofocus: true
+        visibility:
+          title: Repository Visibility
+          type: string
+          oneOf:
+            - title: Internal
+              const: internal
+            - title: Private
+              const: private
+
+  steps:
+    - action: nestle:backstage-hostname-lookup
+      id: hostname-lookup
+      name: Hostname Lookup
+
+    - action: nestle:backstage:variablizer
+      id: variablizer-repo
+      name: Sets Repository Name Variable
+      input:
+        variables:
+          name: ${{ parameters.repoName }}
+          organization: ${{ 'nestle-it' if 'idp.nestle.com' in steps['hostname-lookup'].output.hostname else 'nestle-devtest' }}
+
+    - id: github-repo-get
+      action: github:repo:get
+      name: Get GitHub Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer-repo'].output.organization }}&repo=${{ steps['variablizer-repo'].output.name }}
+
+    - action: fetch:template
+      id: fetch-template
+      name: Fetch Template Repository
+      input:
+        url: https://github.com/nestle-it/gha-template-python/tree/main
+        targetPath: content
+        templateFileExtension: true
+        replace: true
+
+    - id: github-repository-create
+      action: publish:github
+      name: Create GitHub Repository
+      if: ${{ steps['github-repo-get'].output.exists == false }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer-repo'].output.organization }}&repo=${{ steps['variablizer-repo'].output.name }}
+        sourcePath: content
+        defaultBranch: main
+        description: Python repository with GitHub Actions created by Backstage.
+        repoVisibility: ${{ parameters.visibility }}
+
+  output:
+    links:
+      - title: Repository URL
+        url: ${{ steps['github-repository-create'].output.remoteUrl }}

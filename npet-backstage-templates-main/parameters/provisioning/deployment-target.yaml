@@ -1,0 +1,18 @@
+title: Deployment Target
+required: [clusterType]
+properties:
+  clusterType:
+    title: Deployment Target
+    description: |
+      Where the workloads of this application will run.
+      **AKS** keeps the default behaviour.
+      **ARO** provisions the application on the Azure Red Hat OpenShift cluster
+      instead: a Quay repository and robot permission are created and the generated
+      resources are labelled `cluster-type: aro`.
+    type: string
+    default: aks
+    oneOf:
+      - title: AKS (default)
+        const: aks
+      - title: ARO (Azure Red Hat OpenShift)
+        const: aro

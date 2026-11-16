@@ -1,0 +1,26 @@
+- id: fetch
+  action: fetch:template:file
+  name: Template Payload
+  input:
+    url: ../../../.templateable-content/catalog/component.yaml.njk
+    targetPath: ./${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.system.split('/')[1] }}/components/${{ parameters.name }}.yaml
+    values:
+      # Metadata
+      name: ${{ parameters.name }}
+      namespace: ${{ parameters.namespace }}
+      description: ${{ parameters.description }}
+      visibility: ${{ parameters.visibility }}
+      annotations: ${{ parameters.annotations }}
+      tags: ${{ parameters.tags }}
+      # Component
+      type: ${{ parameters.type }}
+      lifecycle: ${{ parameters.lifecycle }}
+      owner: ${{ parameters.owner }}
+      domain: ${{ parameters.domain }}
+      system: ${{ parameters.system }}
+      subcomponentOf: ${{ parameters.subcomponentOf }}
+      providesApis: ${{ parameters.providesApis }}
+      consumesApis: ${{ parameters.consumesApis }}
+      dependsOn: ${{ parameters.dependsOn }}
+      dependencyOf: ${{ parameters.dependencyOf }}
+      repoUrl: ${{ parameters.repoUrl }}

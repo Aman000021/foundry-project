@@ -1,0 +1,64 @@
+title: Organization & Compliance
+required:
+  - department
+  - market
+  - dataClassification
+  - pii
+properties:
+  department:
+    title: Department / Subscription
+    type: string
+    description: "Azure subscription or department name"
+  apmId:
+    title: Application Portfolio Management (APM ID)
+    type: string
+  market:
+    title: Market
+    type: string
+    description: "Market name (e.g., Brazil)"
+  marketFullName:
+    title: Location Full Name
+    type: string
+    description: "Full location path (e.g., All Locations/Americas/Latin America/Brazil)"
+  costCenter:
+    title: Cost Center
+    type: string
+    description: "Cost center code and name (e.g., 1207030001 - Diretoria e-Business)"
+  costPlan:
+    title: Cost Plan
+    type: string
+  dataClassification:
+    title: Data Classification
+    type: string
+    oneOf:
+      - title: Public
+        const: Public
+      - title: Internal
+        const: Internal
+      - title: Confidential
+        const: Confidential
+      - title: Highly Confidential
+        const: Highly Confidential
+  pii:
+    title: Contains Personally Identifiable Information (PII)?
+    type: string
+    oneOf:
+      - title: "Yes"
+        const: "true"
+      - title: "No"
+        const: "false"
+  network:
+    title: Network
+    type: string
+  sharedCost:
+    title: Shared Cost
+    type: string
+    oneOf:
+      - title: "Yes"
+        const: "yes"
+      - title: "No"
+        const: "no"
+  ticket:
+    title: ServiceNow Ticket (RITM)
+    type: string
+    description: "ServiceNow request ticket (e.g., RITM0123456)"

@@ -1,0 +1,21 @@
+title: GitHub Team Parameters
+required:
+  - teamNames
+  - maintainers
+properties:
+  teamNames:
+    title: GitHub Team Names
+    type: array
+    minItems: 1
+    items:
+      type: string
+  maintainers:
+    title: GitHub Team Maintainers
+    type: array
+    minItems: 1
+    items:
+      type: string
+  createGitHubTeam:
+    title: Create a New GitHub Team?
+    type: boolean
+    default: false

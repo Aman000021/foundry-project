@@ -1,0 +1,20 @@
+title: Ownership Parameters
+required:
+  - owner
+  - domain
+properties:
+  owner:
+    title: Owner
+    type: string
+    description: Owner of the Resource.
+    ui:field: OwnerPicker
+    ui:options:
+      catalogFilter:
+        kind: [Group, User]
+  domain:
+    title: Parent Domain
+    description: Parent domain of this Resource.
+    ui:field: OwnerPicker
+    ui:options:
+      catalogFilter:
+        kind: [Domain]

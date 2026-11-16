@@ -1,0 +1,38 @@
+---
+kind: AppProject
+apiVersion: argoproj.io/v1alpha1
+metadata:
+  name: ${{ values.name | lower }}
+  namespace: openshift-gitops
+  # Finalizer that ensures that project is not deleted until it is not referenced by any application
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  sourceRepos:
+  - '${{ values.sourceRepo }}'
+  # Only permit applications to deploy to the specified namespace in the same cluster
+  destinations:
+  {%- for namespace in values.namespaces %}
+  - namespace: ${{ namespace | lower }}
+    server: https://kubernetes.default.svc
+  {%- endfor %}
+  # Allow all namespaced-scoped resources to be created, except for ResourceQuota, LimitRange, NetworkPolicy
+  namespaceResourceBlacklist:
+  - group: ''
+    kind: ResourceQuota
+  - group: ''
+    kind: LimitRange
+  - group: ''
+    kind: NetworkPolicy
+  sourceNamespaces:
+  - ${{ values.name | lower }}
+  roles:
+  {% for env in values.environments -%}
+  - description: access to the ${{ env | upper }} environment application
+    groups:
+    - ${{ values.namespaceOwnerGroups[loop.index0] }}
+    name: ${{ env }}-admin
+    policies:
+    - p, proj:${{ values.name | lower }}:${{ env }}-admin, applications, get, ${{ values.name | lower }}/${{ values.namespaces[loop.index0] | lower }}, allow
+    - p, proj:${{ values.name | lower }}:${{ env }}-admin, applications, sync, ${{ values.name | lower }}/${{ values.namespaces[loop.index0] | lower }}, allow
+  {% endfor %}

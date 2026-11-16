@@ -1,0 +1,247 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: devtestCreateGhRepoRenamed
+  title: Devtest Create GitHub Repository Renamed
+  description: |
+    Repo names follow this structure:
+
+    **\[SCOPE]-\[TEAM]-\[SOLUTION]-\[CONTEXT]-\[TITLE]**
+
+    * **SCOPE**: Parent system (e.g., *glbl*)
+    * **TEAM**: Owning team (e.g., *devops*)
+    * **SOLUTION**: Platform/project (e.g., *github*)
+    * **CONTEXT**: Sub-domain (fallback to system) (e.g., *enterprise*)
+    * **TITLE**: Repo purpose (e.g., *frontend*)
+
+    **Example:** `glbl-devops-github-enterprise-frontend`
+
+
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - github
+    - end-user
+
+spec:
+  owner: group:default/aad-devtest-backstage-glbl-test004-marleixo
+  type: github
+
+  parameters:
+    - title: GitHub Repository Parameters
+      required:
+        - ref
+        - title
+        - organization
+        - adminTeams
+      ui:order:
+        - ref
+        - adminTeams
+        - accessTeams
+        - teamName
+        - context
+        - title
+        - organization
+        - visibility
+      properties:
+        ref:
+          title: Parent System
+          description: The parent System entity the repository and associated teams will belong to in Backstage.
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+        adminTeams:
+          title: Admin Teams
+          type: array
+          description: |
+            Only teams that belong to the selected parent System will be available for selection. 
+            
+            If no teams are available, you need to [create a GitHub Team](/create/templates/default/devtest-create-github-teams-v2) first.
+          ui:field: CatalogTeamPicker
+          ui:options:
+            systemField: ref
+            permissionFilter: admin
+        accessTeams:
+          title: Write Teams
+          type: array
+          description: |
+            Only teams that belong to the selected parent System will be available for selection. 
+            
+            If no teams are available, you need to [create a GitHub Team](/create/templates/default/devtest-create-github-teams-v2) first.
+          ui:field: CatalogTeamPicker
+          ui:options:
+            systemField: ref
+            permissionFilter: write
+        teamName:
+          title: Team Name Segment
+          type: string
+          description: |
+            Short team identifier used in the repository name.
+            Final format: [SCOPE]-[TEAM]-[SOLUTION]-[CONTEXT]-[TITLE]
+        context:
+          title: Context
+          type: string
+          description: |
+            Context segment for the repository name. Leave blank to use the context from the selected system.
+            Final format: [SCOPE]-[TEAM]-[SOLUTION]-[CONTEXT]-[TITLE]
+        title:
+          title: Repository Title
+          type: string
+          description: |
+            Name segment for the repository name.
+            Final format: [SCOPE]-[TEAM]-[SOLUTION]-[CONTEXT]-[TITLE]
+
+        organization:
+          title: Target Organization
+          type: string
+          default: nestle-devtest
+          oneOf:
+            - title: nestle-devtest
+              const: nestle-devtest
+        visibility:
+          title: Repository Visibility
+          type: string
+          default: internal
+          oneOf:
+            - title: Internal (visible to everyone at Nestlé)
+              const: internal
+            - title: Private (visible only to invited users)
+              const: private
+
+  steps:
+    - id: system-entity
+      action: catalog:get:entity:data
+      name: Get System Information
+      input:
+        ref: ${{ parameters.ref }}
+
+    - id: validate-admin-teams
+      name: Validate admin team selection
+      action: catalog:get:entity:data
+      input:
+        ref: resource:default/${{ parameters.adminTeams[0] or 'please-select-at-least-one-admin-team' }}
+
+    - id: admin-team-entity
+      action: catalog:get:entity:data
+      name: Get Admin Team Information
+      each: ${{ parameters.adminTeams }}
+      input:
+        ref: resource:default/${{ each.value }}
+
+    - id: access-team-entity
+      action: catalog:get:entity:data
+      name: Get Access Team Information
+      if: ${{ parameters.accessTeams }}
+      each: ${{ parameters.accessTeams }}
+      input:
+        ref: resource:default/${{ each.value }}
+
+    - id: variablizer
+      action: nestle:backstage:variablizer
+      name: Prepare Variables
+      input:
+        variables:
+          scope: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('scope') }}
+          solution: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}
+          systemContext: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}
+          repoName: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('scope') }}${{ '-' + parameters.teamName if parameters.teamName else '' }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ parameters.context if parameters.context else (steps['system-entity'].output.annotations | parseEntityAnnotations('context')) }}-${{ parameters.title }}
+          organization: ${{ parameters.organization }}
+          calculatedRepos:
+            - original: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('scope') }}${{ '-' + parameters.teamName if parameters.teamName else '' }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ parameters.context if parameters.context else (steps['system-entity'].output.annotations | parseEntityAnnotations('context')) }}-${{ parameters.title }}
+              calculatedName: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('scope') }}${{ '-' + parameters.teamName if parameters.teamName else '' }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ parameters.context if parameters.context else (steps['system-entity'].output.annotations | parseEntityAnnotations('context')) }}-${{ parameters.title }}
+              branchName: onboard-techdocs-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('scope') }}${{ '-' + parameters.teamName if parameters.teamName else '' }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ parameters.context if parameters.context else (steps['system-entity'].output.annotations | parseEntityAnnotations('context')) }}-${{ parameters.title }}
+              catalogInfoUrl: https://github.com/${{ parameters.organization }}/${{ steps['system-entity'].output.annotations | parseEntityAnnotations('scope') }}${{ '-' + parameters.teamName if parameters.teamName else '' }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ parameters.context if parameters.context else (steps['system-entity'].output.annotations | parseEntityAnnotations('context')) }}-${{ parameters.title }}/blob/main/.backstage/catalog-info.yaml
+
+    - id: github-repo-get
+      action: github:repo:get
+      name: Check if GitHub Repository Already Exists
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+
+    - id: scaffold-repo-content
+      action: fetch:template
+      name: Scaffold Initial Repository Content
+      input:
+        url: ./content
+        targetPath: ./repo-content
+        values:
+          organization: ${{ steps['variablizer'].output.organization }}
+          teams: ${{ steps['admin-team-entity'].output.annotations }}
+
+    - id: github-repository-create
+      action: publish:github
+      name: Create GitHub Repository
+      if: ${{ steps['github-repo-get'].output.exists == false }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        sourcePath: ./repo-content
+        defaultBranch: main
+        description: Repository created by Backstage.
+        repoVisibility: ${{ parameters.visibility }}
+        protectEnforceAdmins: false # Needs to be false for merging TechDocs PR
+        customProperties:
+          cost-center-id: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('cost-center') }}
+          cost-plan: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('cost-plan') }}
+          apm-id: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('apm-id') }}
+          
+    - id: github-team-associate-admin
+      action: github:teams:add-team-to-repository
+      name: Add Admin Teams to Repository
+      each: ${{ parameters.adminTeams }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        slug: ${{ steps['admin-team-entity'].output.annotations[each.key] | parseEntityAnnotations('github-team-slug') }}
+        permission: admin
+
+    - id: github-team-associate-access
+      action: github:teams:add-team-to-repository
+      name: Add Access Teams to Repository
+      if: ${{ parameters.accessTeams }}
+      each: ${{ parameters.accessTeams }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        slug: ${{ steps['access-team-entity'].output.annotations[each.key] | parseEntityAnnotations('github-team-slug') }}
+        permission: push
+
+    - id: configure-branch-protection
+      action: github:gitflow:configure
+      name: Configure Branch Protection Rules
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        mainBranch: main
+        requiredReviewers: 1
+        requireCodeOwnerReviews: true
+        dismissStaleReviews: true
+        requireConversationResolution: true
+        enforceAdmins: false
+
+    - id: onboard-techdocs
+      action: catalog:batch-onboard-techdocs
+      name: Onboard TechDocs
+      input:
+        templateUrl: https://github.com/nestle-devtest/npet-backstage-templates/tree/main/templates/provisioning/onboard-techdocs/content
+        organization: ${{ steps['variablizer'].output.organization }}
+        calculatedRepos: ${{ steps['variablizer'].output.calculatedRepos }}
+        taskId: ${{ context.task.id }}
+        owner: ${{ steps['system-entity'].output.owner }}
+        system: ${{ parameters.ref }}
+        repoUrl: github.com?owner=nestle-it&repo=ghe-migration
+        workflowId: merge-techdocs.yml
+        branchOrTagName: main
+
+    - id: register-component
+      action: catalog:batch-register
+      name: Register Repository in Backstage
+      if: ${{ steps['github-repo-get'].output.exists == false }}
+      input:
+        organization: ${{ steps['variablizer'].output.organization }}
+        calculatedRepos: ${{ steps['variablizer'].output.calculatedRepos }}
+
+  output:
+    links:
+      - title: Repository URL
+        url: ${{ steps['github-repository-create'].output.remoteUrl }}

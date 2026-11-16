@@ -1,0 +1,25 @@
+id: fetch
+action: fetch:template:file
+description: Fetch resources template from Resource Group
+each: ${{ steps.import.output.resources }}
+name: Template Payload
+input:
+  url: ../../../.templateable-content/catalog/resource.yaml.njk
+  targetPath: ./${{ parameters.domain | parseEntityRef | pick('name') }}/systems/${{ parameters.name }}/resources/${{ each.value.name }}.yaml
+  values:
+    # Metadata
+    name: ${{ each.value.name }}
+    namespace: ${{ parameters.namespace }}
+    description: ${{ parameters.description }}
+    visibility: ${{ parameters.visibility }}
+    resourceProperties: ${{ each.value.properties }}
+    annotations: ${{ parameters.annotations }}
+    tags: ${{ parameters.tags }}
+    # Resource
+    type: ${{ each.value.type }}
+    owner: ${{ parameters.owner }}
+    domain: ${{ parameters.domain }}
+    system: ${{ parameters.system }}
+    dependsOn: ${{ parameters.dependsOn }}
+    dependencyOf: ${{ parameters.dependencyOf }}
+

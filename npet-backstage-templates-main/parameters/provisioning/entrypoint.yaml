@@ -1,0 +1,24 @@
+title: Entrypoint Configuration
+required:
+  - name
+  - repository
+properties:
+  name:
+    title: Entrypoint Name
+    description: Name of the deployment entrypoint. Combined with the system name to build the GitOps deployment name (`<system>-<entrypoint>`).
+    type: string
+    minLength: 3
+    maxLength: 30
+    pattern: '^([a-z][a-z0-9]*)(-[a-z0-9]+)*$'
+    ui:autofocus: true
+  repository:
+    title: Repository
+    description: Repository this entrypoint deploys from (e.g., br-mysystem-webapp-bff).
+    type: string
+    minLength: 3
+    maxLength: 100
+    pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$'
+errorMessage:
+  properties:
+    name: "Lowercase alphanumeric tokens (first starts with a letter) delimited by -"
+    repository: "Only letters, numbers, '.', '_' and '-' are allowed"

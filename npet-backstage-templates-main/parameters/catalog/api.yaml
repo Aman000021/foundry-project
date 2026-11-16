@@ -1,0 +1,77 @@
+title: API Parameters
+required:
+  - type
+  - lifecycle
+  - owner
+  - domain
+  - system
+properties:
+  type:
+    title: Type
+    type: string
+    description: The type of API.
+    oneOf:
+      - title: OpenAPI
+        const: openapi
+      - title: AsyncAPI
+        const: asyncapi
+      - title: GraphQL
+        const: graphql
+      - title: gRPC
+        const: grpc
+  lifecycle:
+    title: Lifecycle
+    type: string
+    description: The lifecycle of the API.
+    oneOf:
+      - title: Experimental
+        const: experimental
+      - title: Production
+        const: production
+      - title: Deprecated
+        const: deprecated
+  owner:
+    title: Owner
+    type: string
+    description: Owner of the API.
+    ui:field: OwnerPicker
+    ui:options:
+      catalogFilter:
+        kind: [Group, User]
+  domain:
+    title: Parent Domain
+    description: Parent domain of this API.
+    ui:field: OwnerPicker
+    ui:options:
+      catalogFilter:
+        kind: [Domain]
+  system:
+    title: Parent System
+    description: Parent system of this API.
+    ui:field: OwnerPicker
+    ui:options:
+      catalogFilter:
+        kind: [System]
+  definition:
+    title: API Definition
+    type: string
+    description: The definition of the API, based on the format defined by spec.type
+    ui:widget: textarea
+    ui:options:
+      rows: 10
+    ui:help: "Change this spec to match your API type!"
+    ui:placeholder: |
+      openapi: 3.0.4
+      info:
+        title: Sample API
+        ...
+      servers:
+        ...
+      paths:
+        /users:
+          get:
+            summary: Returns a list of users.
+            ...
+            responses:
+              "200": # status code
+                ...

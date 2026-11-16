@@ -1,0 +1,103 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: userRefTest
+  title: Shared Test User Ref Extraction
+  description: Action to test extraction of user reference in Backstage
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - github
+    - azure
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: service
+
+  parameters:
+    - title: Azure Devops Repo Information
+      ui:order:
+        - backstageSystem
+        - ADOOrganization
+        - ADOProject
+        - ADORepo
+        - autoGatherEmail
+        - userEmail
+      properties:
+        ADOOrganization:
+          title: ADO Organization
+          type: string
+          description: Enter the name of your Azure DevOps organization
+        ADOProject:
+          title: ADO Project
+          type: string
+          description: Enter the name of your Azure DevOps project
+        ADORepo:
+          title: ADO Repository
+          type: string
+          description: Enter the name of the repository you want to migrate
+        backstageSystem:
+          title: System
+          type: string
+          description: Select the system you want the migrated repo to belong to
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+        autoGatherEmail:
+          title: Automatically gather email from profile
+          type: boolean
+          default: false
+          description: "Leave unchecked to manually enter email for testing. When checked, email is gathered from your Backstage profile."
+          ui:help: "In production, this will default to true for automatic email collection."
+      required:
+        - ADOOrganization
+        - ADOProject
+        - ADORepo
+        - backstageSystem
+      dependencies:
+        autoGatherEmail:
+          allOf:
+            - if:
+                properties:
+                  autoGatherEmail:
+                    const: false
+              then:
+                properties:
+                  userEmail:
+                    title: User Email
+                    type: string
+                    description: "Enter your email address (testing mode)"
+                required:
+                  - userEmail
+            - if:
+                properties:
+                  autoGatherEmail:
+                    const: true
+              then:
+                properties:
+                  {}
+  steps:
+    - action: nestle:backstage:variablizer
+      id: emailResolver
+      name: Resolve Email Source
+      input:
+        variables:
+          userEmail: ${{ parameters.userEmail if parameters.autoGatherEmail == false else user.entity.spec.profile.email }}
+    - action: debug:log
+      id: log
+      name: Placeholder logging step
+      input:
+        message: |
+          **Migration Details:**
+          - **ADO Organization:** ${{ parameters.ADOOrganization }}
+          - **ADO Project:** ${{ parameters.ADOProject }}
+          - **ADO Repository:** ${{ parameters.ADORepo }}
+          - **Email of user requesting migration:** ${{ steps['emailResolver'].output.userEmail }}
+          - **User extracted from Backstage:** ${{ user.ref }}
+          - **Microsoft Email:** ${{ user.entity.spec.profile.email }}
+          - **System:** ${{ parameters.backstageSystem }}
+  output:
+    text:
+      - title: Migration Workflow URL
+        content: "URL to workflow for the migration: "

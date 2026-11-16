@@ -1,0 +1,67 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: data-from-entity-annotations-system
+  title: Data From Entity Annotations - System
+  description: GETs data from a particular Entities Annotations.
+  annotations:
+    nestle.com/template-visibility: private
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: examples
+
+  parameters:
+    - title: Parameters
+      required:
+        - ref
+      properties:
+        ref:
+          title: Catalog Ref
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+
+  steps:
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.ref }}
+    - action: debug:log
+      id: write-debug-line
+      name: Output Entity data
+      input:
+        message: |
+          Kind: ${{ steps['system-entity'].output.kind }}
+          Namespace: ${{ steps['system-entity'].output.namespace }}
+          Name: ${{ steps['system-entity'].output.name }}
+          Owner: ${{ steps['system-entity'].output.owner }}
+          Domain: ${{ steps['system-entity'].output.domain }}
+          CostCenter: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('cost-center') }}
+          Scope: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/scope') }}
+    - action: catalog:get:entity:data
+      id: system-entity-by-object
+      name: Get System Entity By Object
+      input:
+        ref:
+          {
+            kind: "system",
+            name: "${{ steps['system-entity'].output.name }}",
+            namespace: "${{ steps['system-entity'].output.namespace }}",
+          }
+    - action: debug:log
+      id: write-debug-line-by-object
+      name: Output Entity data By Object
+      input:
+        message: |
+          Kind: ${{ steps['system-entity-by-object'].output.kind }}
+          Namespace: ${{ steps['system-entity-by-object'].output.namespace }}
+          Name: ${{ steps['system-entity-by-object'].output.name }}
+          Owner: ${{ steps['system-entity-by-object'].output.owner }}
+          Domain: ${{ steps['system-entity-by-object'].output.domain }}
+          CostCenter: ${{ steps['system-entity-by-object'].output.annotations | parseEntityAnnotations('cost-center') }}
+          Scope: ${{ steps['system-entity-by-object'].output.annotations | parseEntityAnnotations('nestle.com/scope') }}

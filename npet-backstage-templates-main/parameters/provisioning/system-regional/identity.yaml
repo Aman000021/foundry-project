@@ -1,0 +1,63 @@
+title: Regional System Identity
+required:
+  - name
+  - description
+  - scope
+  - domain
+properties:
+  name:
+    title: Name
+    type: string
+    description: "System name in format {solution}-{context} (e.g., analytics-datalab)"
+    pattern: '^[a-z][a-z0-9]*-[a-z][a-z0-9]*$'
+  description:
+    title: Description
+    type: string
+  scope:
+    title: Scope
+    type: string
+    description: "Market scope code (e.g., nbra, glob)"
+    pattern: '^[a-z][a-z0-9-]*$'
+  domain:
+    title: Parent Domain
+    type: string
+    description: Parent domain of this System.
+    ui:field: OwnerPicker
+    ui:options:
+      catalogFilter:
+        kind: [Domain]
+  # Regional systems are always private and owned by their per-system members
+  # AAD group (group:default/aad[-devtest]-backstage-<scope>-<name>-members).
+  # Both are computed server-side in the provisioning steps so they cannot be
+  # overridden from the request — see steps/provisioning/system-regional/*.
+  gitopsAlreadyExists:
+    title: GitOps repo already exists
+    type: boolean
+    default: false
+    description: If enabled, the GitOps repository will not be created — provide its URL below.
+  createEntraidGroups:
+    title: Create EntraID groups
+    type: boolean
+    default: true
+    description: If enabled, dispatches the npet-backstage-automation workflow to create the techleads/members EntraID groups.
+  generateDomain:
+    title: Generate Domain
+    type: boolean
+    default: true
+    description: If enabled, this entity will generate an XDomain in Crossplane.
+dependencies:
+  gitopsAlreadyExists:
+    allOf:
+      - if:
+          properties:
+            gitopsAlreadyExists:
+              const: true
+        then:
+          properties:
+            gitopsRepoUrl:
+              title: GitOps Repository URL
+              type: string
+              description: "URL of the existing GitOps repository (e.g., https://github.com/nestle-it/nusa-nisacams-nisa-gitops.git)"
+              pattern: '^https://github\.com/(nestle-it|nestle-devtest)/[a-z][a-z0-9-]+-gitops\.git$'
+          required:
+            - gitopsRepoUrl

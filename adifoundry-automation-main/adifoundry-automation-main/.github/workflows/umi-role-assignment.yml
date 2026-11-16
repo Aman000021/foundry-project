@@ -1,0 +1,137 @@
+name: Foundry UMI Role Assignment
+run-name: MS Foundry UMI Role Assignment [${{ inputs.UUID }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment: { type: string, required: true }
+      location: { type: string, required: true }
+      foundryResourceName: { type: string, required: true }
+      foundryProjectName: { type: string, required: true }
+      umiObjectID: { type: string, required: true }
+      segment: { type: string, required: true }
+      appName: { type: string, required: true }
+      snowNumber: { type: string, required: true }
+      UUID: { description: 'UUID for Backstage dispatch-with-response tracking', required: false, default: '' }
+        
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }
+      location: { type: string, required: true }
+      foundryResourceName: { type: string, required: true }
+      foundryProjectName: { type: string, required: true }
+      umiObjectID: { type: string, required: true }
+      segment: { type: string, required: true }
+      appName: { type: string, required: true }
+      snowNumber: { type: string, required: true }
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  plan:
+    runs-on: [self-hosted, Linux, X64]
+    environment: ${{ inputs.environment }}
+    env:
+      ENV_PATH: "${{github.workspace}}/environments/${{ inputs.environment }}/${{ inputs.location }}"
+      ARM_TENANT_ID: ${{ vars.TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars.CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
+    defaults:
+      run:
+        working-directory: iac/umi-permission
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Generate a token
+        id: generate_token_for_accessing_modules
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.NPET_REGISTRY_APPID }}
+          private-key: ${{ secrets.NPET_REGISTRY_PRIVATE_KEY }}
+          owner: "nestle-it"
+
+      - name: Terraform init
+        run: |
+          # this ugly command will instruct git to use non-default token we retrieved above to access any git repo:
+          git config --global url."https://x-access-token:${{ steps.generate_token_for_accessing_modules.outputs.token }}@github.com/nestle-it".insteadOf "https://github.com/nestle-it"
+          terraform init \
+          -backend-config="${{ env.ENV_PATH }}/${{ inputs.segment }}/backend-config-project.tfvars" \
+          -backend-config="key=backend-${{ inputs.segment }}-${{ inputs.appName }}-${{ inputs.snowNumber }}-umi.tfstate"
+        
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan \
+          -var-file="${{ env.ENV_PATH }}/${{ inputs.segment }}/hosted-agent-service.tfvars" \
+          -var="foundry_resource_name=${{ inputs.foundryResourceName }}" \
+          -var="foundry_project_name=${{ inputs.foundryProjectName }}" \
+          -var="umi_object_id=${{ inputs.umiObjectID }}" \
+          -out=umitfplan
+               
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-umi
+          path: iac/umi-permission/umitfplan
+
+  manual-approval-agent-deployment:
+    if: github.ref_name == 'main'
+    runs-on: [self-hosted, Linux, X64]
+    environment: ${{ inputs.environment }}-agent-approval
+    needs: [plan]
+    steps:
+      - uses: actions/checkout@v4
+
+  apply:
+    if: github.ref_name == 'main'
+    runs-on: [self-hosted, Linux, X64]
+    environment: ${{ inputs.environment }}
+    needs: [plan,manual-approval-agent-deployment]
+    env:
+      ENV_PATH: "${{github.workspace}}/environments/${{ inputs.environment }}/${{ inputs.location }}"
+      ARM_TENANT_ID: ${{ vars.TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars.CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
+    defaults:
+      run:
+        working-directory: iac/umi-permission
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-umi
+          path: iac/umi-permission
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Terraform init
+        run: |
+          # this ugly command will instruct git to use non-default token we retrieved above to access any git repo:
+          terraform init \
+          -backend-config="${{ env.ENV_PATH }}/${{ inputs.segment }}/backend-config-project.tfvars" \
+          -backend-config="key=backend-${{ inputs.segment }}-${{ inputs.appName }}-${{ inputs.snowNumber }}-umi.tfstate"
+            
+      - name: Terraform apply
+        run: |
+          terraform apply umitfplan

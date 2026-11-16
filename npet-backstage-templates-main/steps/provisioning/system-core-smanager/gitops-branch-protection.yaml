@@ -1,0 +1,28 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+- id: gitops-branch-protection-core
+  if: ${{ not parameters.gitopsAlreadyExists }}
+  name: Setup Core GitOps Branch Protection
+  description: Apply branch protection on main of the newly created core GitOps repository.
+  action: github:branch-protection:create
+  input:
+    repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ parameters.scope }}-${{ parameters.name }}-core-gitops
+    branch: main
+    requiredApprovingReviewCount: 1
+    bypassPullRequestAllowances:
+      teams:
+        - nusa-platform-regional-admin
+        - aad-backstage-administrators
+
+- id: gitops-branch-protection-smanager
+  if: ${{ not parameters.gitopsAlreadyExists }}
+  name: Setup Smanager GitOps Branch Protection
+  description: Apply branch protection on main of the newly created smanager GitOps repository.
+  action: github:branch-protection:create
+  input:
+    repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ parameters.scope }}-${{ parameters.name }}-smanager-gitops
+    branch: main
+    requiredApprovingReviewCount: 1
+    bypassPullRequestAllowances:
+      teams:
+        - nusa-platform-regional-admin
+        - aad-backstage-administrators

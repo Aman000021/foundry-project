@@ -1,0 +1,42 @@
+- id: create-mssqldatabase-yaml
+  name: Scaffold MSSQL Database YAMLs
+  each: ${{ parameters.mssqldatabases }}
+  action: fetch:template:file
+  input:
+    url: ../../../.templateable-content/catalog/resource.yaml.njk
+    targetPath: ./${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['mssqlserver-entity'].output.system.split('/')[1] }}/resources/${{ steps['mssqlserver-entity'].output.name.split('-')[0] }}-${{ steps['mssqlserver-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/environment') }}-${{ steps['mssqlserver-entity'].output.system.split('/')[1] | replace('-', '') }}-${{ each.value.name }}-sqd.yaml
+    values:
+      name: ${{ steps['mssqlserver-entity'].output.name.split('-')[0] }}-${{ steps['mssqlserver-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/environment') }}-${{ steps['mssqlserver-entity'].output.system.split('/')[1] | replace('-', '') }}-${{ each.value.name }}-sqd
+      namespace: ${{ steps['mssqlserver-entity'].output.system.split('/')[1] }}
+      description: MSSQL Database ${{ each.value.name }} for server ${{ steps['mssqlserver-entity'].output.name }}
+      visibility: ${{ steps['mssqlserver-entity'].output.annotations | parseEntityAnnotations('entity-visibility') }}
+      type: mssqldatabase
+      owner: ${{ steps['mssqlserver-entity'].output.owner }}
+      domain: ${{ steps['system-entity'].output.domain }}
+      system: ${{ steps['mssqlserver-entity'].output.system }}
+      resourceProperties: {}
+      resourceTags: {}
+      annotations:
+        - key: nestle.com/system-type
+          value: regional
+        - key: br.nestle.com/domain
+          value: ${{ steps['mssqlserver-entity'].output.namespace.split('-')[0] }}
+        - key: br.nestle.com/environment
+          value: ${{ steps['mssqlserver-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/environment') }}
+        - key: br.nestle.com/sku-name
+          value: GP_S_Gen5_${{ each.value.storage }}
+        - key: br.nestle.com/min-capacity
+          value: "0.5"
+        - key: br.nestle.com/auto-pause-delay-in-minutes
+          value: "60"
+        - key: br.nestle.com/collation
+          value: SQL_Latin1_General_CP1_CI_AS
+        - key: br.nestle.com/mssqlserver
+          value: ${{ steps['mssqlserver-entity'].output.name }}
+        - key: br.nestle.com/created-at
+          value: ${{ "" | now }}
+      tags: []
+      links: []
+      dependsOn:
+        - resource:${{ steps['mssqlserver-entity'].output.system.split('/')[1] }}/${{ steps['mssqlserver-entity'].output.name }}
+      dependencyOf: []

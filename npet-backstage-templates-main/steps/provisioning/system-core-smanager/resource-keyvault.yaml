@@ -1,0 +1,69 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+#
+# Azure Key Vault names are capped at 24 characters and take no dashes, so the
+# names are built as `{scope}{env}{name}{context}key` (4 + 2 + name + context + 3).
+# `core` always fits — the solution name is limited to 11 characters — while
+# `smanager` only fits for names up to 7 characters and is shortened to `sman`
+# otherwise, the same way the existing pairs do it (nbradvvsasmanagerkey,
+# namsdvinnoplaysmankey).
+- id: fetch-resource-keyvault-core
+  action: fetch:template:file
+  name: Template Resource Payload — core keyvault
+  each: ${{ parameters.environments }}
+  input:
+    url: ../../../.templateable-content/catalog/resource.yaml.njk
+    targetPath: ./${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}-core/resources/${{ parameters.scope }}${{ each.value.name }}${{ parameters.name }}corekey.yaml
+    values:
+      name: ${{ parameters.scope }}${{ each.value.name }}${{ parameters.name }}corekey
+      namespace: ${{ parameters.name }}-core
+      description: key-vault resource owned by the system ${{ parameters.name }}-core (${{ each.value.name }})
+      visibility: private
+      type: key-vault
+      owner: group:default/${{ ('aad-devtest-backstage-' if steps.getEntitiesConfig.output.entities.owner == 'nestle-devtest' else 'aad-backstage-') + parameters.scope + '-' + parameters.name + '-core-members' }}
+      domain: ${{ parameters.domain }}
+      system: system:${{ parameters.name }}-core/${{ parameters.name }}-core
+      annotations:
+        - key: nestle.com/system-type
+          value: regional
+        - key: br.nestle.com/created-at
+          value: ${{ "" | now }}
+        - key: br.nestle.com/environment
+          value: ${{ each.value.name }}
+        - key: br.nestle.com/domain
+          value: ${{ parameters.name }}
+        - key: br.nestle.com/enable-rbac-authorization
+          value: "true"
+      tags: []
+      dependsOn: []
+      dependencyOf: []
+
+- id: fetch-resource-keyvault-smanager
+  action: fetch:template:file
+  name: Template Resource Payload — smanager keyvault
+  each: ${{ parameters.environments }}
+  input:
+    url: ../../../.templateable-content/catalog/resource.yaml.njk
+    targetPath: ./${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}-smanager/resources/${{ parameters.scope }}${{ each.value.name }}${{ parameters.name }}${{ 'smanager' if parameters.name.length <= 7 else 'sman' }}key.yaml
+    values:
+      name: ${{ parameters.scope }}${{ each.value.name }}${{ parameters.name }}${{ 'smanager' if parameters.name.length <= 7 else 'sman' }}key
+      namespace: ${{ parameters.name }}-smanager
+      description: key-vault resource owned by the system ${{ parameters.name }}-smanager (${{ each.value.name }})
+      visibility: private
+      type: key-vault
+      owner: group:default/${{ ('aad-devtest-backstage-' if steps.getEntitiesConfig.output.entities.owner == 'nestle-devtest' else 'aad-backstage-') + parameters.scope + '-' + parameters.name + '-smanager-members' }}
+      domain: ${{ parameters.domain }}
+      system: system:${{ parameters.name }}-smanager/${{ parameters.name }}-smanager
+      annotations:
+        - key: nestle.com/system-type
+          value: regional
+        - key: br.nestle.com/created-at
+          value: ${{ "" | now }}
+        - key: br.nestle.com/environment
+          value: ${{ each.value.name }}
+        - key: br.nestle.com/domain
+          value: ${{ parameters.name }}
+        - key: br.nestle.com/enable-rbac-authorization
+          value: "true"
+      tags: []
+      dependsOn: []
+      dependencyOf: []

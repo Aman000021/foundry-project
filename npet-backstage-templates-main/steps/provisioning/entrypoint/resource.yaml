@@ -1,0 +1,37 @@
+# Requires a prior system-entity step in the including template (catalog:get:entity:data)
+- id: fetch-resource-entrypoint
+  action: fetch:template:file
+  name: Template Resource Payload — entrypoint
+  each: ${{ parameters.environments }}
+  input:
+    url: ../../../.templateable-content/catalog/resource.yaml.njk
+    targetPath: ./${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/resources/${{ each.value }}-${{ steps['system-entity'].output.name }}-${{ parameters.name }}.yaml
+    values:
+      name: ${{ each.value }}-${{ steps['system-entity'].output.name }}-${{ parameters.name }}
+      namespace: ${{ steps['system-entity'].output.name }}
+      description: deployment entrypoint owned by the system ${{ steps['system-entity'].output.name }} (${{ each.value }})
+      visibility: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/entity-visibility') }}
+      type: deployment
+      owner: ${{ steps['system-entity'].output.owner }}
+      domain: ${{ steps['system-entity'].output.domain }}
+      system: system:${{ steps['system-entity'].output.namespace }}/${{ steps['system-entity'].output.name }}
+      resourceProperties:
+        environment: ${{ each.value }}
+        componentName: ${{ steps['system-entity'].output.name }}-${{ parameters.name }}
+        repoName: ${{ parameters.repository }}
+      resourceTags: {}
+      annotations:
+        - key: br.nestle.com/created-at
+          value: ${{ "" | now }}
+        - key: br.nestle.com/environment
+          value: ${{ each.value }}
+        - key: nestle.com/resource-type
+          value: deployment
+        - key: nestle.com/system-type
+          value: regional
+      tags:
+        - deployment
+        - entrypoint
+      links: []
+      dependsOn: []
+      dependencyOf: []

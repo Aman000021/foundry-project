@@ -1,0 +1,70 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+- id: fetch-resource-base-core
+  action: fetch:template:file
+  name: Template Resource Payload — core base
+  each: ${{ parameters.environments }}
+  input:
+    url: ../../../.templateable-content/catalog/resource.yaml.njk
+    targetPath: ./${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}-core/resources/${{ parameters.scope }}-${{ each.value.name }}-${{ parameters.name }}-core-base.yaml
+    values:
+      name: ${{ parameters.scope }}-${{ each.value.name }}-${{ parameters.name }}-core-base
+      namespace: ${{ parameters.name }}-core
+      description: base resource owned by the system ${{ parameters.name }}-core (${{ each.value.name }})
+      visibility: private
+      type: base
+      owner: group:default/${{ ('aad-devtest-backstage-' if steps.getEntitiesConfig.output.entities.owner == 'nestle-devtest' else 'aad-backstage-') + parameters.scope + '-' + parameters.name + '-core-members' }}
+      domain: ${{ parameters.domain }}
+      system: system:${{ parameters.name }}-core/${{ parameters.name }}-core
+      annotations:
+        - key: nestle.com/system-type
+          value: regional
+        - key: br.nestle.com/created-at
+          value: ${{ "" | now }}
+        - key: br.nestle.com/environment
+          value: ${{ each.value.name }}
+        - key: br.nestle.com/domain
+          value: ${{ parameters.name }}
+        - key: br.nestle.com/resource-group
+          value: ${{ each.value.resourceGroup }}
+        - key: br.nestle.com/app-security-group
+          value: ${{ each.value.appSecurityGroup }}
+        - key: br.nestle.com/subnet-id
+          value: ${{ each.value.subnetId }}
+      tags: []
+      dependsOn: []
+      dependencyOf: []
+
+- id: fetch-resource-base-smanager
+  action: fetch:template:file
+  name: Template Resource Payload — smanager base
+  each: ${{ parameters.environments }}
+  input:
+    url: ../../../.templateable-content/catalog/resource.yaml.njk
+    targetPath: ./${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}-smanager/resources/${{ parameters.scope }}-${{ each.value.name }}-${{ parameters.name }}-smanager-base.yaml
+    values:
+      name: ${{ parameters.scope }}-${{ each.value.name }}-${{ parameters.name }}-smanager-base
+      namespace: ${{ parameters.name }}-smanager
+      description: base resource owned by the system ${{ parameters.name }}-smanager (${{ each.value.name }})
+      visibility: private
+      type: base
+      owner: group:default/${{ ('aad-devtest-backstage-' if steps.getEntitiesConfig.output.entities.owner == 'nestle-devtest' else 'aad-backstage-') + parameters.scope + '-' + parameters.name + '-smanager-members' }}
+      domain: ${{ parameters.domain }}
+      system: system:${{ parameters.name }}-smanager/${{ parameters.name }}-smanager
+      annotations:
+        - key: nestle.com/system-type
+          value: regional
+        - key: br.nestle.com/created-at
+          value: ${{ "" | now }}
+        - key: br.nestle.com/environment
+          value: ${{ each.value.name }}
+        - key: br.nestle.com/domain
+          value: ${{ parameters.name }}
+        - key: br.nestle.com/resource-group
+          value: ${{ each.value.resourceGroup }}
+        - key: br.nestle.com/app-security-group
+          value: ${{ each.value.appSecurityGroup }}
+        - key: br.nestle.com/subnet-id
+          value: ${{ each.value.subnetId }}
+      tags: []
+      dependsOn: []
+      dependencyOf: []

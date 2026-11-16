@@ -1,0 +1,5 @@
+id: assert-system-techlead
+name: Assert System Tech Lead
+action: nestle:assert:system-techlead
+input:
+  systemRef: ${{ parameters.system }}

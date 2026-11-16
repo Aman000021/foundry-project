@@ -1,0 +1,31 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: create-resource-template
+  title: Backstage Resource Creation
+  description: Creates a Resource in Backstage.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - entities
+    - create
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: catalog
+
+  parameters:
+    - $yaml: ../../../parameters/catalog/entity-metadata-common.yaml
+
+    - $yaml: ../../../parameters/catalog/entity-ownership.yaml
+
+    - $yaml: ../../../parameters/catalog/resource.yaml
+
+    - $yaml: ../../../parameters/catalog/catalog-repository.yaml
+
+  steps:
+    - $yaml: ../../../steps/catalog/resource.yaml
+    - $yaml: ../../../steps/github/publish.yaml
+
+  output:
+    links:
+      - $yaml: ../../../outputs/github-repository.yaml

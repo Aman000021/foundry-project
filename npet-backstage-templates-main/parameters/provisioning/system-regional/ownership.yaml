@@ -1,0 +1,30 @@
+title: Ownership
+required:
+  - requester
+  - technicalOwner
+  - functionalOwner
+properties:
+  requester:
+    title: Requester (User ID)
+    type: string
+    description: "ServiceNow user ID of the requester (e.g., BRLopesGu)"
+  technicalOwner:
+    title: Technical Owner
+    type: string
+    description: "Email of the technical owner (e.g., Gustavo.Lopes@br.nestle.com)"
+    pattern: '^[^@]+@([^@]+\.)?nestle\.com$'
+  functionalOwner:
+    title: Functional Owner
+    type: string
+    description: "Email of the functional owner (e.g., Jailson.Dias1@br.nestle.com)"
+    pattern: '^[^@]+@([^@]+\.)?nestle\.com$'
+  financialOwner:
+    title: Cost Center Owner
+    type: string
+    description: "Email of the cost center owner"
+    pattern: '^[^@]+@([^@]+\.)?nestle\.com$'
+  billingContact:
+    title: Cost Center Finance Co-Pilot
+    type: string
+    description: "Email of the finance co-pilot"
+    pattern: '^[^@]+@([^@]+\.)?nestle\.com$'

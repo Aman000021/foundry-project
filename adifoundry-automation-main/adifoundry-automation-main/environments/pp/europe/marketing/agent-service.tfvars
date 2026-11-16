@@ -1,0 +1,7 @@
+environment_name                = "pp"
+solution_name = "agentservice"
+resource_group_name             = "glbl-pp-adifoundryhub-adi-euwe-rgp"
+shared_subnet_name              = "emna-pr-g-adi-euwe-002-snt"
+# segment = "mkt"
+#storage_container_name = "foundry"
+#storage_account = "glblppadifoundrysta"

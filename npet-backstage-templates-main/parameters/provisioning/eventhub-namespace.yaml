@@ -1,0 +1,77 @@
+title: EventHub Namespace Configuration
+required:
+  - eventHubs
+properties:
+  entity:
+    title: EventHub Namespace Resource
+    description: The EventHub Namespace resource being edited (set by the edit button).
+    type: string
+    ui:disabled: true
+    ui:widget: hidden
+  eventHubs:
+    title: Event Hubs
+    description: Define the event hubs inside this namespace.
+    type: array
+    minItems: 1
+    items:
+      type: object
+      title: Event Hub
+      required:
+        - name
+        - partitionCount
+        - messageRetention
+      properties:
+        type:
+          type: string
+          default: eventhub
+          ui:widget: hidden
+        name:
+          title: Name
+          type: string
+        partitionCount:
+          title: Partition Count
+          type: number
+          default: 1
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+        messageRetention:
+          title: Message Retention (Days)
+          type: number
+          default: 1
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5

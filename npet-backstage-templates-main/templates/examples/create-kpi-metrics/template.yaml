@@ -1,0 +1,28 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: create-kpi-metrics
+  title: Create KPI Metrics
+  description: Creates KPI Metrics and sends to a configured Log Analytics Workspace.
+  annotations:
+    nestle.com/template-visibility: private
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: examples
+
+  steps:
+    - action: nestle:backstage:kpi
+      id: first
+      name: First Metric - processing
+      input:
+        status: processing
+    - action: nestle:backstage:kpi
+      id: second
+      name: Second Metric - completed
+      input:
+        status: completed
+        correlationId: ${{ steps['first'].output.correlationId }}
+        customContext:
+          environment: dv
+          beep: boop

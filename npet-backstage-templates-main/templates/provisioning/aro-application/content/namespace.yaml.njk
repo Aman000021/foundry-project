@@ -1,0 +1,88 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  namespace: ${{ values.name | lower }}
+  name: ${{ values.name | lower }}-admin-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ${{ values.name | lower }}-admin-role
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: ${{ values.namespaceOwnerGroup }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: ${{ values.name | lower }}
+  name: ${{ values.name | lower }}-admin-role
+rules:
+- apiGroups: [""]
+  resources: ["*"]
+  verbs: ["*"]
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${{ values.name | lower }}
+  labels:
+    argocd.argoproj.io/managed-by: openshift-gitops
+    costplan: "${{ values.costPlan | lower }}"
+    costcenter: "${{ values.costCenter }}"
+    nestle.com/application-namespace: "true"
+    financialowner: "${{ values.financialOwner.split('@')[0] | lower | replace('.', '_') }}_${{ values.financialOwner.split('@')[1] | default('') | lower | replace('.com', '') | replace('.', '_') }}"
+    functionalowner: "${{ values.functionalOwner.split('@')[0] | lower | replace('.', '_') }}_${{ values.functionalOwner.split('@')[1] | default('') | lower | replace('.com', '') | replace('.', '_') }}"
+    technicalowner: "${{ values.technicalOwner.split('@')[0] | lower | replace('.', '_') }}_${{ values.technicalOwner.split('@')[1] | default('') | lower | replace('.com', '') | replace('.', '_') }}"
+    department: "${{ values.department }}"
+    apmcode: "${{ values.apmId }}"
+    market: "${{ values.market | trim | lower | replace(' ', '_') | replace('/', '_') | replace('__', '_') | replace('__', '_') | truncate(63, true, '') }}"
+    productname: "${{ values.solutionName }}-${{ values.context }}"
+    billingcontact: "${{ values.billingContact.split('@')[0] | lower | replace('.', '_') }}_${{ values.billingContact.split('@')[1] | default('') | lower | replace('.com', '') | replace('.', '_') }}"
+    environment: "${{ values.environment | upper }}"
+    dataclassification: "${{ values.dataClassification | replace(' ', '') | lower }}"
+    network: "${{ values.network }}"
+
+---
+# Resource Quota defines how many resources can be requested by default
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: "${{ values.name | lower }}-rq"
+  namespace: ${{ values.name | lower }}
+spec:
+    hard:
+      # compute
+      requests.cpu: "2"
+      requests.memory: 4Gi
+      pods: "16"
+      # storage
+      persistentvolumeclaims: "10"
+      requests.storage: 100Gi
+      # networking
+      services: "16"
+      # example: disable LoadBalancer services
+      services.loadbalancers: "0"
+      services.nodeports: "0"
+
+---
+# This particular Limit Range defines default requests and limits if they are not set by a pod.
+# This is necessary because otherwise pods that do not set requests will not be schedulable
+# due to the above Resource Quota.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: "${{ values.name | lower }}-lr"
+  namespace: ${{ values.name | lower }}
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: ${{ values.resources.containerCPULimit }}
+      memory: ${{ values.resources.containerMemoryLimit }}
+    defaultRequest:
+      cpu: ${{ values.resources.containerCPURequest }}
+      memory: ${{ values.resources.containerMemoryRequest }}

@@ -1,0 +1,33 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+#
+# Container registry names take no dashes — `{scope}{env}{name}coreacr`.
+- id: fetch-resource-registry
+  action: fetch:template:file
+  name: Template Resource Payload — core registry
+  each: ${{ parameters.environments }}
+  input:
+    url: ../../../.templateable-content/catalog/resource.yaml.njk
+    targetPath: ./${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}-core/resources/${{ parameters.scope }}${{ each.value.name }}${{ parameters.name }}coreacr.yaml
+    values:
+      name: ${{ parameters.scope }}${{ each.value.name }}${{ parameters.name }}coreacr
+      namespace: ${{ parameters.name }}-core
+      description: container registry owned by the system ${{ parameters.name }}-core (${{ each.value.name }})
+      visibility: private
+      type: registry
+      owner: group:default/${{ ('aad-devtest-backstage-' if steps.getEntitiesConfig.output.entities.owner == 'nestle-devtest' else 'aad-backstage-') + parameters.scope + '-' + parameters.name + '-core-members' }}
+      domain: ${{ parameters.domain }}
+      system: system:${{ parameters.name }}-core/${{ parameters.name }}-core
+      annotations:
+        - key: nestle.com/system-type
+          value: regional
+        - key: br.nestle.com/created-at
+          value: ${{ "" | now }}
+        - key: br.nestle.com/environment
+          value: ${{ each.value.name }}
+        - key: br.nestle.com/domain
+          value: ${{ parameters.name }}
+        - key: br.nestle.com/cluster
+          value: ${{ parameters.name }}-core
+      tags: []
+      dependsOn: []
+      dependencyOf: []

@@ -1,0 +1,8 @@
+- id: gitops-fetch
+  if: ${{ not parameters.gitopsAlreadyExists }}
+  name: Fetch GitOps Template
+  description: Fetch GitOps template content from nams-platform-backstage-scaffolders.
+  action: fetch:template
+  input:
+    url: https://github.com/nestle-it/nams-platform-backstage-scaffolders/tree/main/gitops
+    targetPath: ./gitops

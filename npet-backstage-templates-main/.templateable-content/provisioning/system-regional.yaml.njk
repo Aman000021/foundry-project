@@ -1,0 +1,69 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: ${{ values.name | dump }}
+  namespace: ${{ values.namespace | dump }}
+  {%- if values.description %}
+  description: ${{ values.description | dump }}
+  {%- endif %}
+  labels:
+    system-type: 'regional'
+    {%- if values.clusterType %}
+    cluster-type: ${{ values.clusterType | dump }}
+    {%- endif %}
+  annotations:
+    br.nestle.com/cluster: ${{ values.cluster | dump }}
+    br.nestle.com/createdAt: ${{ values.createdAt | dump }}
+    br.nestle.com/environments: '[{%- for env in values.environments -%}{"name":"${{ env.name }}","subscription":"${{ env.subscription | default("") }}"}{%- if not loop.last -%},{%- endif -%}{%- endfor -%}]'
+    br.nestle.com/features: '${{ values.features | dump }}'
+    br.nestle.com/generateDomain: '${{ values.generateDomain | dump }}'
+    br.nestle.com/githubTeam: ${{ values.githubTeam | dump }}
+    br.nestle.com/gitOpsRepoUrl: ${{ values.gitOpsRepoUrl | dump }}
+    br.nestle.com/members: '${{ values.members | dump }}'
+    br.nestle.com/techleads: '${{ values.techleads | dump }}'
+    br.nestle.com/updatedAt: ${{ values.updatedAt | dump }}
+    {%- if values.apmId %}
+    nestle.com/apm-id: ${{ values.apmId | dump }}
+    {%- endif %}
+    {%- if values.billingContact %}
+    nestle.com/billing-contact: ${{ values.billingContact | dump }}
+    {%- endif %}
+    nestle.com/context: ${{ values.context | dump }}
+    {%- if values.costCenter %}
+    nestle.com/cost-center: ${{ values.costCenter | dump }}
+    {%- endif %}
+    {%- if values.costPlan %}
+    nestle.com/cost-plan: ${{ values.costPlan | dump }}
+    {%- endif %}
+    nestle.com/data-classification: ${{ values.dataClassification | dump }}
+    nestle.com/department: ${{ values.department | dump }}
+    nestle.com/entity-visibility: ${{ values.visibility | dump }}
+    {%- if values.financialOwner %}
+    nestle.com/financial-owner: ${{ values.financialOwner | dump }}
+    {%- endif %}
+    nestle.com/functional-owner: ${{ values.functionalOwner | dump }}
+    nestle.com/market: ${{ values.market | dump }}
+    {%- if values.marketFullName %}
+    nestle.com/market-full-name: ${{ values.marketFullName | dump }}
+    {%- endif %}
+    {%- if values.network %}
+    nestle.com/network: ${{ values.network | dump }}
+    {%- endif %}
+    nestle.com/pii: ${{ values.pii | dump }}
+    nestle.com/requester: ${{ values.requester | dump }}
+    nestle.com/scope: ${{ values.scope | dump }}
+    {%- if values.sharedCost %}
+    nestle.com/shared-cost: ${{ values.sharedCost | dump }}
+    {%- endif %}
+    nestle.com/solution-name: ${{ values.solutionName | dump }}
+    nestle.com/system-ownership: ${{ values.ownership | dump }}
+    nestle.com/system-type: 'regional'
+    nestle.com/technical-owner: ${{ values.technicalOwner | dump }}
+    {%- if values.ticket %}
+    nestle.com/ticket: ${{ values.ticket | dump }}
+    {%- endif %}
+spec:
+  owner: ${{ values.owner | dump }}
+  domain: ${{ values.domain.name | dump }}
+  lifecycle: experimental

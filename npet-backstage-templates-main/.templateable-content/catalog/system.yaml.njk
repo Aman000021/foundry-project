@@ -1,0 +1,30 @@
+---
+apiVersion: "backstage.io/v1alpha1"
+kind: "System"
+metadata:
+  name: ${{ values.name | dump }}
+  {%- if values.namespace %}
+  namespace: ${{ values.namespace | dump }}
+  {%- endif %}
+  {%- if values.description %}
+  description: ${{ values.description | dump }}
+  {%- endif %}
+  annotations:
+    nestle.com/entity-visibility: ${{ values.visibility | dump }}
+    nestle.com/system-ownership: ${{ values.ownership | dump }}
+  {%- for key, value in values.resourceTags %}
+    nestle.com/${{ key.replace(' ','-') }}: ${{ value | dump }}
+  {%- endfor %}
+  {%- for a in values.annotations %}
+    ${{ a.key }}: ${{ a.value | dump }}
+  {%- endfor %}
+  {%- if values.tags | length %}
+  tags:
+  {%- for a in values.tags %}
+    - ${{ a | lower | dump }}
+  {%- endfor %}
+  {%- endif %}
+spec:
+  owner: ${{ values.owner | dump }}
+  domain: ${{ values.domain.name | dump }}
+  lifecycle: "experimental"

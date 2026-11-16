@@ -1,0 +1,246 @@
+name: Platform and Foundry Resource Deployment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string 
+      segment:
+        required: true
+        type: string
+      location:
+        required: true
+        type: string
+      # branch:
+      #   required: true
+      #   type: string
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  platform-hub-plan:
+    runs-on: [self-hosted, nestle-eur-ws-2022-gh]
+    environment: ${{ inputs.environment }}
+    env:
+      ENV_PATH: "${{github.workspace}}/environments/${{ inputs.environment }}/${{ inputs.location }}"
+      ARM_TENANT_ID: ${{ vars.TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars.CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
+      # ARM_USE_OIDC: "true"
+    defaults:
+      run:
+        working-directory: iac\platform-hub
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Generate a token
+        id: generate_token_for_accessing_modules
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.NPET_REGISTRY_APPID }}
+          private-key: ${{ secrets.NPET_REGISTRY_PRIVATE_KEY }}
+          owner: "nestle-it"
+
+      - name: Terraform init
+        run: |
+          # this ugly command will instruct git to use non-default token we retrieved above to access any git repo:
+          git config --global url."https://x-access-token:${{ steps.generate_token_for_accessing_modules.outputs.token }}@github.com/nestle-it".insteadOf "https://github.com/nestle-it"
+          terraform init -backend-config="${{ env.ENV_PATH }}/backend-config-platform.tfvars"
+        
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan `
+          -var-file="${{ env.ENV_PATH }}/platform.tfvars" `
+          -out=tfplan
+            
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-platform
+          path: iac/platform-hub/tfplan
+
+  manual-approval-platform:
+    if: github.ref_name == 'main'
+    runs-on: [self-hosted, nestle-eur-ws-2022-gh]
+    environment: ${{ inputs.environment }}-platform-approval
+    needs: [platform-hub-plan]
+    steps:
+      - uses: actions/checkout@v4
+
+  platform-hub-apply:
+    if: github.ref_name == 'main'
+    runs-on: [self-hosted, nestle-eur-ws-2022-gh]
+    needs: [platform-hub-plan, manual-approval-platform]
+    environment: ${{ inputs.environment }}
+    env:
+      ENV_PATH: "${{github.workspace}}/environments/${{ inputs.environment }}/${{ inputs.location }}"
+      ARM_TENANT_ID: ${{ vars.TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars.CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
+      # ARM_USE_OIDC: "true"
+    defaults:
+      run:
+        working-directory: iac\platform-hub
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-platform
+          path: iac/platform-hub
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Generate a token
+        id: generate_token_for_accessing_modules
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.NPET_REGISTRY_APPID }}
+          private-key: ${{ secrets.NPET_REGISTRY_PRIVATE_KEY }}
+          owner: "nestle-it"
+
+      - name: Terraform init
+        run: |
+          # this ugly command will instruct git to use non-default token we retrieved above to access any git repo:
+          git config --global url."https://x-access-token:${{ steps.generate_token_for_accessing_modules.outputs.token }}@github.com/nestle-it".insteadOf "https://github.com/nestle-it"
+          terraform init -backend-config="${{ env.ENV_PATH }}/backend-config-platform.tfvars"
+            
+      - name: Terraform apply
+        run: |
+          terraform apply tfplan
+
+  foundry-hub-plan:
+    needs: [platform-hub-plan]
+    runs-on: [self-hosted, nestle-eur-ws-2022-gh]
+    environment: ${{ inputs.environment }}
+    env:
+      ENV_PATH: "${{github.workspace}}/environments/${{ inputs.environment }}/${{ inputs.location }}"
+      ARM_TENANT_ID: ${{ vars.TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars.CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
+      # ARM_USE_OIDC: "true"
+    defaults:
+      run:
+        working-directory: iac\capability\foundry-resource
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Generate a token
+        id: generate_token_for_accessing_modules
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.NPET_REGISTRY_APPID }}
+          private-key: ${{ secrets.NPET_REGISTRY_PRIVATE_KEY }}
+          owner: "nestle-it"
+
+      - name: Terraform init
+        run: |
+          # this ugly command will instruct git to use non-default token we retrieved above to access any git repo:
+          git config --global url."https://x-access-token:${{ steps.generate_token_for_accessing_modules.outputs.token }}@github.com/nestle-it".insteadOf "https://github.com/nestle-it"
+          terraform init -backend-config="${{ env.ENV_PATH }}/${{ inputs.segment }}/backend-config-hub.tfvars" -backend-config="key=backend-${{ inputs.segment }}.tfstate"
+        
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan `
+          -var-file="${{ env.ENV_PATH }}/${{ inputs.segment }}/foundry-resource.tfvars" `
+          -var="project_segment=${{ inputs.segment }}" `
+          -var="foundry_location=${{ inputs.location }}" `
+          -out=tfplan
+            
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-hub
+          path: iac/capability/foundry-resource/tfplan
+  
+  manual-approval-foundry-hub:
+    if: github.ref_name == 'main'
+    runs-on: [self-hosted, nestle-eur-ws-2022-gh]
+    environment: ${{ inputs.environment }}-hub-approval
+    needs: [foundry-hub-plan]
+    steps:
+      - uses: actions/checkout@v4
+
+
+  foundry-hub-deployment:
+    if: github.ref_name == 'main'
+    needs: [foundry-hub-plan, manual-approval-foundry-hub, platform-hub-apply]
+    runs-on: [self-hosted, nestle-eur-ws-2022-gh]
+    environment: ${{ inputs.environment }}
+    env:
+      ENV_PATH: "${{github.workspace}}/environments/${{ inputs.environment }}/${{ inputs.location }}"
+      ARM_TENANT_ID: ${{ vars.TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars.CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.SUBSCRIPTION_ID }}
+      # ARM_USE_OIDC: "true"
+    defaults:
+      run:
+        working-directory: iac\capability\foundry-resource
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-hub
+          path: iac/capability/foundry-resource
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Generate a token
+        id: generate_token_for_accessing_modules
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.NPET_REGISTRY_APPID }}
+          private-key: ${{ secrets.NPET_REGISTRY_PRIVATE_KEY }}
+          owner: "nestle-it"
+
+      - name: Terraform init
+        run: |
+          # this ugly command will instruct git to use non-default token we retrieved above to access any git repo:
+          git config --global url."https://x-access-token:${{ steps.generate_token_for_accessing_modules.outputs.token }}@github.com/nestle-it".insteadOf "https://github.com/nestle-it"
+          terraform init -backend-config="${{ env.ENV_PATH }}/${{ inputs.segment }}/backend-config-hub.tfvars" -backend-config="key=backend-${{ inputs.segment }}.tfstate"
+            
+      - name: Terraform apply
+        run: |
+          terraform apply tfplan
+

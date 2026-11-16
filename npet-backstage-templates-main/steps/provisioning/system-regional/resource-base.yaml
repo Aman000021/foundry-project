@@ -1,0 +1,43 @@
+# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
+# and resolve-environments (steps/provisioning/system-regional/resource-group-create.yaml)
+- id: fetch-resource-base
+  action: fetch:template:file
+  name: Template Resource Payload — base
+  each: ${{ parameters.environments }}
+  input:
+    url: ../../../.templateable-content/catalog/resource.yaml.njk
+    targetPath: ./${{ parameters.domain.split('/')[1] }}/systems/${{ parameters.name }}/resources/${{ parameters.scope }}-${{ each.value.name }}-base.yaml
+    values:
+      name: ${{ parameters.scope }}-${{ each.value.name }}-base
+      namespace: ${{ parameters.name }}
+      description: base resource owned by the system ${{ parameters.name }} (${{ each.value.name }})
+      visibility: private
+      type: base
+      # `cluster-type: aro` label, only on the environments that run on ARO — that
+      # label is what marks a base Resource as living on the ARO cluster. The
+      # remaining environments stay on AKS and are left unlabelled; they can be
+      # migrated later from the Edit Regional System template.
+      clusterType: ${{ 'aro' if parameters.clusterType == 'aro' and each.value.name in parameters.aroEnvironments else '' }}
+      owner: group:default/${{ ('aad-devtest-backstage-' if steps.getEntitiesConfig.output.entities.owner == 'nestle-devtest' else 'aad-backstage-') + parameters.scope + '-' + parameters.name + '-members' }}
+      domain: ${{ parameters.domain }}
+      system: system:${{ parameters.name.split('-')[0] }}/${{ parameters.name }}
+      annotations:
+        - key: nestle.com/system-type
+          value: regional
+        - key: br.nestle.com/created-at
+          value: ${{ "" | now }}
+        - key: br.nestle.com/environment
+          value: ${{ each.value.name }}
+        - key: br.nestle.com/domain
+          value: ${{ parameters.name.split('-')[0] }}
+        - key: br.nestle.com/resource-group
+          value: ${{ steps['resolve-environments'].output.environment[each.key].resourceGroup }}
+        - key: br.nestle.com/app-security-group
+          value: ${{ steps['resolve-environments'].output.environment[each.key].appSecurityGroup }}
+        - key: br.nestle.com/subnet-id
+          value: ${{ steps['resolve-environments'].output.environment[each.key].subnetId }}
+        - key: br.nestle.com/aroCluster
+          value: ${{ parameters.aroCluster }}
+      tags: []
+      dependsOn: []
+      dependencyOf: []

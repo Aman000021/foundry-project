@@ -1,0 +1,29 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: create-system-template
+  title: Backstage System Creation
+  description: Creates Systems in Backstage.
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - entities
+    - create
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: catalog
+
+  parameters:
+    - $yaml: ../../../parameters/catalog/entity-metadata-common.yaml
+
+    - $yaml: ../../../parameters/catalog/system.yaml
+
+    - $yaml: ../../../parameters/catalog/catalog-repository.yaml
+
+  steps:
+    - $yaml: ../../../steps/catalog/system.yaml
+    - $yaml: ../../../steps/github/publish.yaml
+
+  output:
+    links:
+      - $yaml: ../../../outputs/github-repository.yaml
