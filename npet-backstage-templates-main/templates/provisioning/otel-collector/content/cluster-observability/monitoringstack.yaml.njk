@@ -1,0 +1,68 @@
+---
+apiVersion: monitoring.rhobs/v1alpha1
+kind: MonitoringStack
+metadata:
+  name: nestle-otel-monitoring-stack
+  namespace: openshift-monitoring
+  labels:
+    mso: nestle-otel
+  finalizers:
+    - monitoring.observability.openshift.io/finalizer
+spec:
+  logLevel: info
+  alertmanagerConfig:
+    disabled: false
+  prometheusConfig:
+    enableOtlpHttpReceiver: true
+    enableRemoteWriteReceiver: true
+{%- if values.prometheusRemoteWriteUrl %}
+    remoteWrite:
+      - azureAd:
+          cloud: AzurePublic
+          oauth:
+            clientId: ${{ values.prometheusRemoteWriteClientId | dump }}
+            clientSecret:
+              key: secret
+              name: monitoringstack-oauth
+            tenantId: ${{ values.azureTenantId | dump }}
+        messageVersion: V1.0
+        sendNativeHistograms: true
+        url: "${{ values.prometheusRemoteWriteUrl }}"
+{%- endif %}
+    replicas: 1
+  # Monitors from every namespace, still limited to the ones labelled mso: nestle-otel.
+  namespaceSelector: {}
+  resourceSelector:
+    matchLabels:
+      mso: nestle-otel
+  resources:
+    limits:
+      cpu: "2"
+      memory: 2Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+  retention: 30d
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: allow-metrics-scrape
+rules:
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: allow-metrics-scrape-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: allow-metrics-scrape
+subjects:
+  - kind: ServiceAccount
+    name: nestle-otel-monitoring-stack-prometheus
+    namespace: openshift-monitoring

@@ -1,0 +1,27 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ${{ values.namespaceEntityName }}
+  description: Factory namespace for ${{ values.applicationName }} - ${{ values.systemName }} at ${{ values.siteName }}
+  annotations:
+    nestle.com/entity-visibility: internal
+    nestle.com/parent-process: factory-clusters
+    nestle.com/application-name: ${{ values.applicationName }}
+    nestle.com/namespace: ${{ values.namespace }}
+    nestle.com/site-ref: resource:default/${{ values.siteEntityName }}
+    nestle.com/site-identifier: ${{ values.siteIdentifier }}
+    nestle.com/cluster-path: ${{ values.clusterPath }}
+    nestle.com/vlan-id: ${{ values.vlanId }}
+    nestle.com/environment: ${{ values.environment }}
+    nestle.com/apm-id: ${{ values.apmId }}
+    nestle.com/technical-owner: ${{ values.technicalOwner }}
+    github.com/project-slug: ${{ values.gitopsRepoOwner }}/${{ values.gitopsRepoName }}
+  links:
+    - url: https://github.com/${{ values.gitopsRepoOwner }}/${{ values.gitopsRepoName }}/tree/main/policies/cluster/${{ values.clusterPath }}/namespace/${{ values.namespace }}
+      title: GitOps Namespace Configuration
+      icon: catalog
+spec:
+  type: factory-namespace
+  owner: ${{ values.namespaceOwnerGroup }}
+  lifecycle: production
+  system: ${{ values.systemRef }}

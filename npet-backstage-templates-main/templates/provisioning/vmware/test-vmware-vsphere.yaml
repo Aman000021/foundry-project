@@ -1,0 +1,88 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: test-vmware-vsphere
+  title: VMware vSphere Integration Test
+  description: Test template to verify VMware vSphere scaffolder actions
+  tags:
+    - vmware
+    - test
+    - infrastructure
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: service
+
+  parameters:
+    - title: Test Configuration
+      required:
+        - testName
+      properties:
+        testName:
+          title: Test Run Name
+          type: string
+          description: Identifier for this test execution
+          default: vmware-integration-test
+          pattern: '^[a-z0-9-]+$'
+
+  steps:
+    # List all datacenters
+    - id: list-datacenters
+      name: List Datacenters
+      action: vmware:datacenter:list
+      input: {}
+
+    - id: log-datacenters
+      name: Log Datacenters
+      action: debug:log
+      input:
+        message: "Datacenters: ${{ steps['list-datacenters'].output.datacenters | dump }}"
+
+    # List all clusters
+    - id: list-clusters
+      name: List Clusters
+      action: vmware:cluster:list
+      input: {}
+
+    - id: log-clusters
+      name: Log Clusters
+      action: debug:log
+      input:
+        message: "Clusters: ${{ steps['list-clusters'].output.clusters | dump }}"
+
+    # List VM folders
+    - id: list-vm-folders
+      name: List VM Folders
+      action: vmware:folder:list-vm
+      input: {}
+
+    - id: log-vm-folders
+      name: Log VM Folders
+      action: debug:log
+      input:
+        message: "VM Folders: ${{ steps['list-vm-folders'].output.folders | dump }}"
+
+    # List datastore folders
+    - id: list-datastore-folders
+      name: List Datastore Folders
+      action: vmware:folder:list-datastore
+      input: {}
+
+    - id: log-datastore-folders
+      name: Log Datastore Folders
+      action: debug:log
+      input:
+        message: "Datastore Folders: ${{ steps['list-datastore-folders'].output.folders | dump }}"
+
+    # Summary
+    - id: log-summary
+      name: Log Summary
+      action: debug:log
+      input:
+        message: "Test '${{ parameters.testName }}' completed successfully. Found ${{ steps['list-datacenters'].output.datacenters | length }} datacenters, ${{ steps['list-clusters'].output.clusters | length }} clusters, ${{ steps['list-vm-folders'].output.folders | length }} VM folders, and ${{ steps['list-datastore-folders'].output.folders | length }} datastore folders."
+
+  output:
+    testName: ${{ parameters.testName }}
+    datacenterCount: ${{ steps['list-datacenters'].output.datacenters | length }}
+    clusterCount: ${{ steps['list-clusters'].output.clusters | length }}
+    vmFolderCount: ${{ steps['list-vm-folders'].output.folders | length }}
+    datastoreFolderCount: ${{ steps['list-datastore-folders'].output.folders | length }}

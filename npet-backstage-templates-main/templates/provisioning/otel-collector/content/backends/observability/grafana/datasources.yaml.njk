@@ -1,0 +1,118 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grafana-datasources
+  namespace: grafana
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-datasources-token
+  namespace: grafana
+  annotations:
+    kubernetes.io/service-account.name: grafana-datasources
+type: kubernetes.io/service-account-token
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: grafana-datasources-reader
+rules:
+  - apiGroups: [loki.grafana.com]
+    resources: [application]
+    resourceNames: [logs]
+    verbs: [get]
+  # Read every Tempo tenant, including the generated per-application ones.
+  - apiGroups: [tempo.grafana.com]
+    resources: ['*']
+    resourceNames: [traces]
+    verbs: [get]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: grafana-datasources-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: grafana-datasources-reader
+subjects:
+  - kind: ServiceAccount
+    name: grafana-datasources
+    namespace: grafana
+
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: prometheus
+  namespace: grafana
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  datasource:
+    name: Prometheus
+    type: prometheus
+    access: proxy
+    isDefault: true
+    url: http://nestle-otel-monitoring-stack-prometheus.openshift-monitoring.svc:9090
+
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: loki-application
+  namespace: grafana
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  valuesFrom:
+    - targetPath: secureJsonData.httpHeaderValue1
+      valueFrom:
+        secretKeyRef:
+          name: grafana-datasources-token
+          key: token
+  datasource:
+    name: Loki (application)
+    type: loki
+    access: proxy
+    url: https://logging-loki-gateway-http.openshift-logging.svc:8080/api/logs/v1/application/
+    jsonData:
+      httpHeaderName1: Authorization
+      tlsSkipVerify: true
+    secureJsonData:
+      httpHeaderValue1: 'Bearer ${token}'
+
+---
+# One copy per application tenant is added by the generated tenants/ component.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: tempo-platform
+  namespace: grafana
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  valuesFrom:
+    - targetPath: secureJsonData.httpHeaderValue1
+      valueFrom:
+        secretKeyRef:
+          name: grafana-datasources-token
+          key: token
+  datasource:
+    name: Tempo (platform)
+    type: tempo
+    access: proxy
+    url: https://tempo-simplest-gateway.openshift-tempo-operator.svc:8080/api/traces/v1/platform/tempo
+    jsonData:
+      httpHeaderName1: Authorization
+      tlsSkipVerify: true
+    secureJsonData:
+      httpHeaderValue1: 'Bearer ${token}'

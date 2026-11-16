@@ -1,0 +1,62 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: create-entra-group-template
+  title: Create Entra ID Group
+  description: Creates an Entra ID group
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - entra-id
+    - iam
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: provisioning
+
+  parameters:
+    - title: Entra ID Security Group Name
+      required:
+        - groupName
+        - groupOwners
+      properties:
+        groupName:
+          title: Entra ID Group Name
+          description: The name of the Entra ID group - The end name will be AAD-SG-WhateverYouWriteHere
+          type: string
+          ui:options:
+            placeholder: "AAD-SG-backstage-SometThing"
+          default: ""
+        groupOwners:
+          title: Group Owner Email
+          description: Valid email address for the group owner
+          type: string
+          ui:options:
+            placeholder: "owner@example.com"
+          default: ""
+          pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+
+  steps:
+    - action: nestle:backstage:variablizer
+      id: variablizer
+      name: Sets Variables
+      input:
+        variables:
+          entraGroupName: ${{ parameters.groupName }}
+
+    - id: entraid-group-create
+      action: github:actions:dispatch-with-response
+      name: Create EntraID Group
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+        branchOrTagName: main
+        workflowId: entra-id-group.yaml
+        waitForActionCompletion: true
+        timeout: 360
+        workflowInputs:
+          groupNames: ${{ steps['variablizer'].output.entraGroupName | string }}
+          groupOwners: ${{ parameters.groupOwners }}
+
+  outputs:
+    - title: Entra ID Group Creation Pipeline
+      url: ${{ steps['entraid-group-create'].output.workflowUrl }}

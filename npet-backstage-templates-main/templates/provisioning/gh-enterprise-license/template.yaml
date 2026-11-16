@@ -1,0 +1,75 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: gh-enterprise-license
+  title: Onboard users to GitHub Enterprise
+  description: This template onboard users to GitHub Enterprise. The System is mandatory as license costs will be allocated to the Cost Center and Cost Plan inherited from the System, no approvals are required as the System was approved in its creation.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - end-user
+    - enterprise
+    - github
+    - license
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: cloud-template
+
+  parameters:
+    - title: Templates Parameters
+      required:
+        - systemRef
+        - requiredAction
+        - licenseRecipients
+      properties:
+        systemRef:
+          title: Parent System
+          description: Parent System
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+        requiredAction:
+          title: Required Action
+          type: string
+          description: Choose Required Action
+          enum:
+            - Add
+            - Remove
+        licenseRecipients:
+          title: License Recipients
+          type: string
+          description: Comma seperated list of Internal and External Users - Do not use spaces
+          ui:options:
+            placeholder: "e.g. user1@nestle.com,user2@nestle.com,user3@nestle.com"
+          default: ""
+          pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(?:,[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})*$"
+  steps:
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.systemRef }}
+    - action: github:actions:dispatch-with-response
+      id: call-ghe-governance
+      name: GitHub Action Run
+      input:
+        repoUrl: github.com?repo=ghe-governance&owner=nestle-it
+        workflowId: gh_license_mgmt_backstage.yaml
+        branchOrTagName: feat/gh_license_backstage
+        workflowInputs:
+          Action: ${{ parameters.requiredAction }}
+          Cost_Center: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('cost-center') }}
+          Cost_Plan: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('cost-plan') }}
+          License_Recipients: ${{ parameters.licenseRecipients }}
+          External_users: ""
+          Type: "GHE_ENTERPRISE"
+        waitForActionCompletion: true
+        timeout: 600
+  output:
+    text:
+      - title: Message
+        content: "The account is onboarded. Please wait for 40 minutes for the synchronization. Then you are ready to log in GitHub."

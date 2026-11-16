@@ -1,0 +1,24 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ${{ values.name | dump }}
+  {%- if values.title %}
+  title: ${{ values.title | dump }}
+  {%- endif %}
+  {%- if values.description %}
+  description: ${{ values.description | dump }}
+  {%- endif %}
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    github.com/project-slug: ${{ values.orgName }}/${{ values.repoName }}
+  links:
+    - url: https://github.com/${{ values.orgName }}/${{ values.repoName }}
+      title: GitHub Repository
+  tags:
+    - techdocs
+    - documentation
+spec:
+  type: service
+  lifecycle: experimental
+  owner: ${{ values.owner }}
+  system: ${{ values.system }}

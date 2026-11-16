@@ -1,0 +1,352 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: provisioning-python-application
+  title: Python Application
+  description: |
+    Scaffolds a Python application integrated with GitOps workflows and the Backstage catalog,
+    supporting deployment configurations for multiple environments (dv/pp/pr).
+
+    This template:
+    - Creates a GitHub repository seeded from the standard Python template
+    - Sets up branch protection on main
+    - Opens a PR with environment config files on the system's GitOps repository
+    - Opens a PR adding Component, deployment Resource, and repository Resource to the catalog
+    - Creates a SonarQube project
+    - On ARO, creates a Quay robot account and per-environment repositories, publishes the
+      robot token in the System Key Vault of every environment, and writes the robot
+      credentials as repository-level GitHub Actions variables and secrets
+
+    When the Deployment Target is ARO, the deployment Resource is labelled
+    `cluster-type: aro` — the same label the Regional System template writes on the
+    base Resource of an ARO environment.
+  annotations:
+    nestle.com/template-visibility: private
+    nestle.com/template-scope: regional
+  tags:
+    - end-user
+    - python
+    - webapp
+    - regional
+    - aro
+spec:
+  owner: group:default/aad-sg-backstage-ams-admins
+  type: cloud-template
+
+  parameters:
+    - $yaml: ../../../parameters/provisioning/regional-system-picker.yaml
+
+    - $yaml: ../../../parameters/provisioning/deployment-target.yaml
+
+    - title: Application Details
+      required:
+        - name
+        - description
+      properties:
+        name:
+          title: Component Name
+          type: string
+          minLength: 5
+          maxLength: 23
+          description: |
+            Name suffix for this component (e.g. "myapi"). The full repository name will be
+            {scope}-{solution}-{system}-{name} derived from the selected system's annotations.
+          ui:autofocus: true
+          pattern: "^[a-z][a-z0-9]*$"
+          errorMessage:
+            pattern: "Lowercase letters and numbers only, must start with a letter"
+        description:
+          title: Description
+          type: string
+          description: Brief description of the component's purpose.
+  steps:
+    - $yaml: ../../../steps/catalog/assert-system-techlead-create.yaml
+
+    - id: hostname-lookup
+      action: nestle:backstage-hostname-lookup
+      name: Hostname Lookup
+
+    - id: system-entity
+      action: catalog:get:entity:data
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.system }}
+
+    - id: variablizer
+      action: nestle:backstage:variablizer
+      name: Build Variables
+      input:
+        variables:
+          organization: ${{ 'nestle-it' if 'idp.nestle.com' in steps['hostname-lookup'].output.hostname else 'nestle-devtest' }}
+          repoName: >-
+            ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/scope') }}-${{ steps['system-entity'].output.domain.split('/')[1] | replace('-', '') }}-${{ steps['system-entity'].output.name | replace('-', '') }}-${{ parameters.name }}
+          gitopsRepoUrl: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/gitOpsRepoUrl') }}
+          domain: ${{ steps['system-entity'].output.domain.split('/')[1] }}
+          githubAdminTeam: >-
+            ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/githubAdminTeam') if steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/githubAdminTeam') else steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/scope') ~ '-' ~ steps['system-entity'].output.name ~ '-admin' }}
+          githubWriteTeam: >-
+            ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/githubWriteTeam') if steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/githubWriteTeam') else steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/scope') ~ '-' ~ steps['system-entity'].output.name ~ '-write' }}
+
+    - id: variablizer-gitops
+      action: nestle:backstage:variablizer
+      name: Parse GitOps Repository
+      input:
+        variables:
+          gitopsRepoName: ${{ steps['variablizer'].output.gitopsRepoUrl | replace('https://github.com/nestle-it/', '') | replace('https://github.com/nestle-devtest/', '') | replace('.git', '') }}
+          gitopsOrg: ${{ 'nestle-it' if 'nestle-it' in steps['variablizer'].output.gitopsRepoUrl else 'nestle-devtest' }}
+
+    - id: fetch-python-template
+      action: fetch:template
+      name: Fetch Python Template
+      input:
+        url: https://github.com/nestle-it/nams-platform-backstage-scaffolders/tree/main/apps/python
+        targetPath: ./python
+        values:
+          namespace: ${{ steps['system-entity'].output.namespace }}
+          name: ${{ steps['variablizer'].output.repoName }}
+          description: ${{ parameters.description }}
+          type: service
+          owner: ${{ steps['system-entity'].output.owner }}
+          system: ${{ parameters.system }}
+          project: ${{ steps['variablizer'].output.domain }}
+          gitops_repo: ${{ steps['variablizer'].output.gitopsRepoUrl }}
+          githubAdminTeam: ${{ steps['variablizer'].output.githubAdminTeam }}
+
+    - id: publish-python
+      action: publish:github
+      name: Create Python Application Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        sourcePath: ./python
+        defaultBranch: main
+        description: ${{ parameters.description }}
+        repoVisibility: internal
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        gitCommitMessage: '[Backstage] Initial commit'
+
+    - id: github-team-associate-write
+      action: github:teams:add-team-to-repository
+      name: Add Write Team to Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        slug: ${{ steps['variablizer'].output.githubWriteTeam }}
+        permission: push
+
+    - id: github-team-associate-admin
+      action: github:teams:add-team-to-repository
+      name: Add Admin Team to Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        slug: br-nbra-platform-admin
+        permission: admin
+
+    - id: branch-protection
+      action: github:branch-protection:create
+      name: Setup Branch Protection
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=${{ steps['variablizer'].output.repoName }}
+        branch: main
+        requiredApprovingReviewCount: 1
+
+    # --- Quay robot account (ARO deployment target only) ---------------------
+    - id: variablizer-quay
+      action: nestle:backstage:variablizer
+      name: Build Quay Variables
+      input:
+        variables:
+          host: quay.apps.ektnlbrn.westeurope.aroapp.io
+          quayRobotName: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/scope') }}_${{ steps['system-entity'].output.name | replace('-', '_')}}
+          organization: idp_devops
+          # Environments of the System, or an empty list outside ARO. The scaffolder
+          # renders `each` before it applies `if`, and fails the step when `each`
+          # resolves to nothing, so this step must run on every deployment target and
+          # hand the ARO-only steps below a list they can safely iterate.
+          environments: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/environments', true) if parameters.clusterType == 'aro' else [] }}
+          quayRepositoryName: ${{ steps['system-entity'].output.name }}/${{ steps['variablizer'].output.repoName }}
+
+    # Visibility is left at the action default, the same as the ARO Application
+    # template, so images stay readable inside the internal Quay instance.
+    - id: quay-create-repo
+      action: redhat-quay:create-repo
+      name: Create Quay Repositories
+      if: ${{ parameters.clusterType == 'aro' }}
+      input:
+        name: ${{ steps['variablizer-quay'].output.quayRepositoryName }}
+        namespace: ${{ steps['variablizer-quay'].output.organization }}
+        description: Container images for ${{ steps['variablizer'].output.repoName }}, created from Backstage.
+  
+    - id: quay-create-robot-permission
+      action: redhat-quay:create-robot-permission
+      name: Grant Quay Robot Write Permission
+      if: ${{ parameters.clusterType == 'aro' }}
+      input:
+        repository: ${{ steps['variablizer-quay'].output.quayRepositoryName }}
+        robot: ${{ steps['variablizer-quay'].output.quayRobotName }}
+        namespace: ${{ steps['variablizer-quay'].output.organization }}
+        role: write
+
+    - id: gitops-env-dv
+      action: roadiehq:utils:fs:write
+      name: Write GitOps Config - dv
+      input:
+        path: ./gitops/dv/${{ steps['variablizer'].output.repoName }}.yaml
+        content: |-
+          name: ${{ steps['variablizer'].output.repoName }}
+          env:
+            CHANGE_FOR_APP_ENV: dv
+
+    - id: gitops-env-pp
+      action: roadiehq:utils:fs:write
+      name: Write GitOps Config - pp
+      input:
+        path: ./gitops/pp/${{ steps['variablizer'].output.repoName }}.yaml
+        content: |-
+          name: ${{ steps['variablizer'].output.repoName }}
+          env:
+            CHANGE_FOR_APP_ENV: pp
+
+    - id: gitops-env-pr
+      action: roadiehq:utils:fs:write
+      name: Write GitOps Config - pr
+      input:
+        path: ./gitops/pr/${{ steps['variablizer'].output.repoName }}.yaml
+        content: |-
+          name: ${{ steps['variablizer'].output.repoName }}
+          env:
+            CHANGE_FOR_APP_ENV: pr
+
+    - id: push-gitops
+      action: publish:github:pull-request
+      name: Update GitOps Repository
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer-gitops'].output.gitopsOrg }}&repo=${{ steps['variablizer-gitops'].output.gitopsRepoName }}
+        sourcePath: ./gitops
+        branchName: add-${{ steps['variablizer'].output.repoName }}
+        title: "Add Python application - ${{ steps['variablizer'].output.repoName }}"
+        description: "Add deployment config files for ${{ steps['variablizer'].output.repoName }}"
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+    - id: catalog-component
+      action: roadiehq:utils:fs:write
+      name: Write Component Entity
+      input:
+        path: ./catalog-content/${{ steps['variablizer'].output.domain }}/systems/${{ steps['system-entity'].output.name }}/components/${{ steps['variablizer'].output.repoName }}.yaml
+        content: |-
+          apiVersion: backstage.io/v1alpha1
+          kind: Component
+          metadata:
+            name: ${{ steps['variablizer'].output.repoName }}
+            namespace: ${{ steps['system-entity'].output.namespace }}
+            description: ${{ parameters.description }}
+            annotations:
+              nestle.com/entity-visibility: internal
+              nestle.com/domain: ${{ steps['variablizer'].output.domain }}
+              nestle.com/language: python
+              github.com/project-slug: ${{ steps['variablizer'].output.organization }}/${{ steps['variablizer'].output.repoName }}
+              sonarqube.org/project-key: ${{ steps['variablizer'].output.repoName }}
+              br.nestle.com/domain: ${{ steps['variablizer'].output.domain }}
+              br.nestle.com/language: python
+            tags:
+              - python
+              - webapp
+          spec:
+            type: service
+            lifecycle: experimental
+            owner: ${{ steps['system-entity'].output.owner }}
+            system: ${{ parameters.system }}
+
+    - id: catalog-deployment-resource
+      action: roadiehq:utils:fs:write
+      name: Write Deployment Resource Entity (dv)
+      input:
+        path: ./catalog-content/${{ steps['variablizer'].output.domain }}/systems/${{ steps['system-entity'].output.name }}/resources/dv-${{ steps['variablizer'].output.repoName }}.yaml
+        content: |-
+          apiVersion: backstage.io/v1alpha1
+          kind: Resource
+          metadata:
+            name: dv-${{ steps['variablizer'].output.repoName }}
+            namespace: ${{ steps['system-entity'].output.namespace }}
+            description: deployment owned by the system ${{ steps['system-entity'].output.name }}
+            ${{ 'labels: { cluster-type: aro }' if parameters.clusterType == 'aro' else '' }}
+            annotations:
+              nestle.com/entity-visibility: internal
+              nestle.com/domain: ${{ steps['variablizer'].output.domain }}
+              nestle.com/system-type: regional
+              nestle.com/environment: dv
+              nestle.com/language: python
+              br.nestle.com/domain: ${{ steps['variablizer'].output.domain }}
+              br.nestle.com/environment: dv
+              br.nestle.com/componentName: ${{ steps['variablizer'].output.repoName }}
+              br.nestle.com/language: python
+          spec:
+            type: deployment
+            owner: ${{ steps['system-entity'].output.owner }}
+            system: ${{ parameters.system }}
+
+    - id: catalog-repository-resource
+      action: roadiehq:utils:fs:write
+      name: Write Repository Resource Entity
+      input:
+        path: ./catalog-content/${{ steps['variablizer'].output.domain }}/systems/${{ steps['system-entity'].output.name }}/resources/${{ steps['variablizer'].output.repoName }}-repo.yaml
+        content: |-
+          apiVersion: backstage.io/v1alpha1
+          kind: Resource
+          metadata:
+            name: ${{ steps['variablizer'].output.repoName }}-repo
+            namespace: ${{ steps['system-entity'].output.namespace }}
+            description: Repository for ${{ steps['variablizer'].output.repoName }}
+            annotations:
+              nestle.com/entity-visibility: internal
+              nestle.com/domain: ${{ steps['variablizer'].output.domain }}
+              nestle.com/system-type: regional
+              nestle.com/repo-url: git@github.com:${{ steps['variablizer'].output.organization }}/${{ steps['variablizer'].output.repoName }}.git
+              br.nestle.com/domain: ${{ steps['variablizer'].output.domain }}
+              br.nestle.com/repoUrl: git@github.com:${{ steps['variablizer'].output.organization }}/${{ steps['variablizer'].output.repoName }}.git
+              br.nestle.com/repoName: ${{ steps['variablizer'].output.repoName }}
+          spec:
+            type: repository
+            owner: ${{ steps['system-entity'].output.owner }}
+            system: ${{ parameters.system }}
+
+    - id: publish-catalog
+      action: publish:github:pull-request
+      name: Create Catalog Pull Request
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.organization }}&repo=npet-backstage-catalog
+        sourcePath: ./catalog-content/${{ steps['variablizer'].output.domain }}
+        targetPath: ${{ steps['variablizer'].output.domain }}
+        branchName: python-app-${{ steps['variablizer'].output.repoName }}
+        title: "Python Application - ${{ steps['variablizer'].output.repoName }}"
+        description: "Add Component and Resource entities for Python application ${{ steps['variablizer'].output.repoName }}"
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+    - id: sonarqube
+      action: github:actions:dispatch-with-response
+      name: Create SonarQube Project
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+        branchOrTagName: main
+        workflowId: create-sonarqube-project.yaml
+        waitForActionCompletion: true
+        timeout: 720
+        workflowInputs:
+          organization: ${{ steps['variablizer'].output.organization }}
+          repository: ${{ steps['variablizer'].output.repoName }}
+          admins: ${{ user.entity.spec.profile.email }}
+
+  output:
+    links:
+      - title: Application Repository
+        url: ${{ steps['publish-python'].output.remoteUrl }}
+      - title: GitOps Pull Request
+        url: ${{ steps['push-gitops'].output.remoteUrl }}
+      - title: Catalog Pull Request
+        url: ${{ steps['publish-catalog'].output.remoteUrl }}
+      - title: SonarQube Workflow
+        url: ${{ steps['sonarqube'].output.workflowUrl }}

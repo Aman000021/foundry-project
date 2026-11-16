@@ -1,0 +1,134 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: kafka-send-message
+  title: Send Kafka Message
+  description: >
+    Sends a JSON message to a Confluent Kafka topic by dispatching the
+    kafka-python.yml GitHub Actions workflow. Backstage waits for the
+    workflow to complete and reports success or failure directly in the UI.
+    Optionally listens on a response topic.
+  annotations:
+    nestle.com/template-visibility: internal
+    backstage.io/techdocs-ref: url:https://github.com/nestle-it/nexus_automation_data_ingestion/tree/main
+
+  tags:
+    - kafka
+    - data-ingestion
+    - github-actions
+    - nexus
+spec:
+  owner: group:default/AAD-SG-backstage-innovation
+  type: cloud-template
+
+  parameters:
+    - title: System Association
+      required:
+        - ref
+      properties:
+        ref:
+          title: Parent System
+          description: System to associate this Resource Group to.
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+
+    - title: Kafka Message
+      required:
+        - bootstrap_server
+        - topic
+        - message
+      properties:
+        bootstrap_server:
+          title: Confluent Server
+          type: string
+          default: sasl-kafka.apps-640.hqvevocp02.vev.hq.nestle.com:443
+          description: >
+            Kafka bootstrap server address (host:port).
+          ui:autofocus: true
+
+        topic:
+          title: Topic Name
+          type: string
+          default: model-training-events
+          description: >
+            Name of the existing Kafka topic to send the message to.
+
+        message:
+          title: Message Payload (JSON)
+          type: string
+          ui:widget: textarea
+          ui:options:
+            rows: 8
+          default: '{ "from-window": "2025-10-29 00:00:00", "to-window": "2025-10-30 00:00:00" }'
+          description: >
+            JSON body of the message (e.g. { "from-window": "2025-10-29 00:00:00", "to-window": "2025-10-30 00:00:00" }).
+
+        key:
+          title: Message Key (optional)
+          type: string
+          description: >
+            Optional partition key. Messages with the same key always land
+            on the same partition.
+
+    - title: Response Listener (optional)
+      description: >
+        If you need the workflow to wait for a confirmation message on the
+        same Kafka topic, fill in the fields below. Leave empty to skip.
+      properties:
+        response_topic:
+          title: Response Topic
+          default: model-training-events
+          type: string
+          description: >
+            Kafka topic to listen on for a response message.
+            Use the same topic as above to listen for confirmations there.
+            Leave empty to skip the listener step.
+
+        expected_response:
+          title: Expected Response (JSON)
+          type: string
+          ui:widget: textarea
+          ui:options:
+            rows: 6
+          default: '{"from-window": "2025-10-29 00:00:00", "to-window": "2025-10-30 00:00:00", "SNOWFLAKE_STATUS": "COMPLETED", "dataset": 1}'
+          description: >
+            JSON object with key/value pairs the incoming message must
+            contain to be accepted as the confirmation. Leave empty to
+            accept the first message received.
+
+        listener_timeout:
+          title: Listener Timeout (seconds)
+          type: string
+          default: '1800'
+          description: >
+            How many seconds to wait for a response before failing.
+
+  steps:
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.ref }}
+
+    - id: dispatch-kafka-send
+      name: Dispatch GitHub Actions workflow
+      action: github:actions:dispatch-with-response
+      input:
+        repoUrl: github.com?repo=nexus_automation_data_ingestion&owner=nestle-it
+        workflowId: kafka-python_ws.yml
+        branchOrTagName: main
+        waitForActionCompletion: true
+        timeout: 1900
+        workflowInputs:
+          bootstrap_server: ${{ parameters.bootstrap_server }}
+          topic:            ${{ parameters.topic }}
+          message:          ${{ parameters.message }}
+          key:              ${{ parameters.key }}
+          response_topic:     ${{ parameters.response_topic }}
+          expected_response:  ${{ parameters.expected_response }}
+          listener_timeout:   ${{ parameters.listener_timeout }}
+

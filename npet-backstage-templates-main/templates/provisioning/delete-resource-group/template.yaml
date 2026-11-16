@@ -1,0 +1,86 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: resource-group-deletion
+  title: Delete a Resource Group
+  description: Deletes Azure Resource Group.
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - cpw
+    - azure
+    - resourcegroup
+    - deletion
+spec:
+  owner: group:default/AAD-backstage-glbl-marleixo-test006
+  type: cloud-template
+
+  parameters:
+    - title: Parameters
+      required:
+        - ref
+      properties:
+        ref:
+          title: Parent System
+          description: System to associate this ResourceGroup to.
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+        pipelineParameters:
+          title: Resource Group Specific Parameters
+          description: Resource Group specific parameters to send to the Azure DevOps pipeline.
+          type: object
+          properties:
+            tenant:
+              title: Tenant
+              type: string
+              oneOf:
+                - title: NestlePROD
+                  const: nestle.onmicrosoft.com
+                - title: NestleDEV
+                  const: nestlew2k.onmicrosoft.com
+                - title: NestleINT
+                  const: nestleint.onmicrosoft.com
+                - title: NestleCHINA
+                  const: nestlebj.partner.onmschina.cn
+            Region:
+              title: Region
+              type: string
+              default:
+            subscription:
+              title: Subscription
+              type: string
+              default:
+            resourcegroup:
+              title: ResourceGroup
+              type: string
+              description: Choose exact ResourceGroup
+              default:
+  steps:
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.ref }}
+
+    - id: pipeline-run
+      name: PipelineRun
+      action: azure:pipeline:run
+      input:
+        organization: nestle-it
+        project: STIG
+        branch: feat/backstage
+        pipelineId: 1554
+        pipelineParameters:
+          ticket: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('ticket') }}
+          location_full_name: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('market-full-name') }}
+          region: ${{ parameters.pipelineParameters.Region }}
+          tenant: ${{ parameters.pipelineParameters.tenant }}
+          u_requester: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('requester') }}
+          SubscriptionName: ${{ parameters.pipelineParameters.subscription }}
+          resourcegroupname: ${{ parameters.pipelineParameters.resourcegroup }}
+        waitForPipelineCompletion: true

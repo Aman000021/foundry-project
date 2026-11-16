@@ -1,0 +1,332 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: provisioning-create-webapp-react-bff
+  title: WebApp React + BFF
+  description: |
+    Scaffold a complete web application with a React frontend and a NodeJS Express BFF.
+    This template creates one repository for each component and publishes initial project code.
+
+    When the Deployment Target is ARO, the React and BFF deployment Resources and the
+    DNS Resource are labelled `cluster-type: aro` — the same label the Regional System
+    template writes on the base Resource of an ARO environment.
+
+    On ARO it also creates a Quay robot account with a repository per environment for the
+    React and the BFF images, publishes the robot token in the System Key Vault of every
+    environment, and writes the robot credentials as repository-level GitHub Actions
+    variables and secrets on both repositories.
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - webapp
+    - react
+    - bff
+    - provisioning
+    - aro
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: cloud-template
+
+  parameters:
+    - $yaml: ../../../parameters/provisioning/webapp-react-bff.yaml
+    - $yaml: ../../../parameters/provisioning/deployment-target.yaml
+    - $yaml: ../../../parameters/catalog/catalog-repository.yaml
+
+  steps:
+    - id: system-entity
+      name: Get System Entity
+      action: catalog:get:entity:data
+      input:
+        ref: ${{ parameters.systemRef }}
+
+    - $yaml: ../../../steps/provisioning/webapp-react-bff/fetch-react.yaml
+    - $yaml: ../../../steps/provisioning/webapp-react-bff/fetch-bff.yaml
+    - $yaml: ../../../steps/provisioning/webapp-react-bff/fetch-dns.yaml
+    - $yaml: ../../../steps/provisioning/webapp-react-bff/label-dns-aro.yaml
+
+    - id: clone-gitops
+      name: Clone GitOps Repository
+      action: github:extras:clone
+      input:
+        repoUrl: ${{ steps['system-entity'].output.annotations['nestle.com/gitOpsRepoUrl'] }}
+        workingDirectory: gitops
+
+    - id: write-react-gitops
+      name: Create React GitOps Manifests
+      each: ["dv", "pp", "pr"]
+      action: roadiehq:utils:fs:write
+      input:
+        path: ./gitops/${{ each.value }}/${{ steps['system-entity'].output.name }}-webapp-react.yaml
+        content: |-
+          name: ${{ steps['system-entity'].output.name }}-webapp-react
+
+    - id: write-bff-gitops
+      name: Create BFF GitOps Manifests
+      each: ["dv", "pp", "pr"]
+      action: roadiehq:utils:fs:write
+      input:
+        path: ./gitops/${{ each.value }}/${{ steps['system-entity'].output.name }}-webapp-bff.yaml
+        content: |-
+          name: ${{ steps['system-entity'].output.name }}-webapp-bff
+          env:
+            CHANGE_FOR_APP_ENV: ${{ each.value }}
+
+    - id: create-react-deployment-resource
+      name: Scaffold React Deployment Resource Entity
+      action: fetch:template:file
+      input:
+        url: ../../../.templateable-content/catalog/resource.yaml.njk
+        targetPath: >-
+          ./${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/resources/dv-${{ steps['system-entity'].output.name }}-webapp-react.yaml
+        values:
+          name: dv-${{ steps['system-entity'].output.name }}-webapp-react
+          namespace: ${{ steps['system-entity'].output.name }}
+          description: React deployment owned by the system ${{ steps['system-entity'].output.name }}
+          # `cluster-type: aro` label, only when this application is deployed to ARO —
+          # the same label the Regional System template writes on the base Resource of
+          # an ARO environment. An AKS deployment is left unlabelled.
+          clusterType: ${{ 'aro' if parameters.clusterType == 'aro' else '' }}
+          visibility: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('entity-visibility') }}
+          type: deployment
+          owner: ${{ steps['system-entity'].output.owner }}
+          domain: ${{ steps['system-entity'].output.domain }}
+          system: system:${{ steps['system-entity'].output.namespace }}/${{ steps['system-entity'].output.name }}
+          dependsOn: []
+          dependencyOf: []
+          resourceTags: {}
+          resourceProperties:
+            environment: dv
+            componentName: ${{ steps['system-entity'].output.name }}-webapp-react
+            language: react
+          annotations:
+            - key: nestle.com/resource-type
+              value: deployment
+          links: []
+          tags:
+            - webapp
+            - react
+
+    - id: create-bff-deployment-resource
+      name: Scaffold BFF Deployment Resource Entity
+      action: fetch:template:file
+      input:
+        url: ../../../.templateable-content/catalog/resource.yaml.njk
+        targetPath: >-
+          ./${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/resources/dv-${{ steps['system-entity'].output.name }}-webapp-bff.yaml
+        values:
+          name: dv-${{ steps['system-entity'].output.name }}-webapp-bff
+          namespace: ${{ steps['system-entity'].output.name }}
+          description: NodeJS BFF deployment owned by the system ${{ steps['system-entity'].output.name }}
+          # `cluster-type: aro` label, only when this application is deployed to ARO —
+          # the same label the Regional System template writes on the base Resource of
+          # an ARO environment. An AKS deployment is left unlabelled.
+          clusterType: ${{ 'aro' if parameters.clusterType == 'aro' else '' }}
+          visibility: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('entity-visibility') }}
+          type: deployment
+          owner: ${{ steps['system-entity'].output.owner }}
+          domain: ${{ steps['system-entity'].output.domain }}
+          system: system:${{ steps['system-entity'].output.namespace }}/${{ steps['system-entity'].output.name }}
+          dependsOn: []
+          dependencyOf: []
+          resourceTags: {}
+          resourceProperties:
+            environment: dv
+            componentName: ${{ steps['system-entity'].output.name }}-webapp-bff
+            language: nodejs
+          annotations:
+            - key: nestle.com/resource-type
+              value: deployment
+          links: []
+          tags:
+            - webapp
+            - bff
+
+    - id: create-react-repository-resource
+      name: Scaffold React Repository Entity
+      action: fetch:template:file
+      input:
+        url: ../../../.templateable-content/catalog/resource.yaml.njk
+        targetPath: >-
+          ./${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/resources/${{ steps['system-entity'].output.name }}-webapp-react.yaml
+        values:
+          name: ${{ steps['system-entity'].output.name }}-webapp-react
+          namespace: ${{ steps['system-entity'].output.name }}
+          description: React repository owned by the system ${{ steps['system-entity'].output.name }}
+          visibility: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('entity-visibility') }}
+          type: repository
+          owner: ${{ steps['system-entity'].output.owner }}
+          domain: ${{ steps['system-entity'].output.domain }}
+          system: system:${{ steps['system-entity'].output.namespace }}/${{ steps['system-entity'].output.name }}
+          dependsOn: []
+          dependencyOf: []
+          resourceTags: {}
+          resourceProperties:
+            repoUrl: git@github.com:${{ parameters.repoOwner }}/${{ steps['system-entity'].output.name }}-webapp-react.git
+          annotations:
+            - key: nestle.com/resource-type
+              value: repository
+          links: []
+          tags:
+            - webapp
+            - react
+            - repository
+
+    - id: create-bff-repository-resource
+      name: Scaffold BFF Repository Entity
+      action: fetch:template:file
+      input:
+        url: ../../../.templateable-content/catalog/resource.yaml.njk
+        targetPath: >-
+          ./${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/resources/${{ steps['system-entity'].output.name }}-webapp-bff.yaml
+        values:
+          name: ${{ steps['system-entity'].output.name }}-webapp-bff
+          namespace: ${{ steps['system-entity'].output.name }}
+          description: BFF repository owned by the system ${{ steps['system-entity'].output.name }}
+          visibility: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('entity-visibility') }}
+          type: repository
+          owner: ${{ steps['system-entity'].output.owner }}
+          domain: ${{ steps['system-entity'].output.domain }}
+          system: system:${{ steps['system-entity'].output.namespace }}/${{ steps['system-entity'].output.name }}
+          dependsOn: []
+          dependencyOf: []
+          resourceTags: {}
+          resourceProperties:
+            repoUrl: git@github.com:${{ parameters.repoOwner }}/${{ steps['system-entity'].output.name }}-webapp-bff.git
+          annotations:
+            - key: nestle.com/resource-type
+              value: repository
+          links: []
+          tags:
+            - webapp
+            - bff
+            - repository
+
+    - id: publish-react
+      name: Publish React Repository
+      action: publish:github
+      input:
+        repoUrl: github.com?owner=${{ parameters.repoOwner }}&repo=${{ steps['system-entity'].output.name }}-webapp-react
+        sourcePath: ./react
+        defaultBranch: main
+        repoVisibility: ${{ parameters.visibility }}
+        description: React frontend generated by Backstage template
+
+    - id: protect-react-main
+      name: Protect React Main Branch
+      action: github:branch-protection:create
+      input:
+        repoUrl: github.com?owner=${{ parameters.repoOwner }}&repo=${{ steps['system-entity'].output.name }}-webapp-react
+        branch: main
+        requiredApprovingReviewCount: 1
+
+    - id: publish-bff
+      name: Publish BFF Repository
+      action: publish:github
+      input:
+        repoUrl: github.com?owner=${{ parameters.repoOwner }}&repo=${{ steps['system-entity'].output.name }}-webapp-bff
+        sourcePath: ./nodejs-express
+        defaultBranch: main
+        repoVisibility: ${{ parameters.visibility }}
+        description: NodeJS Express BFF generated by Backstage template
+
+    - id: protect-bff-main
+      name: Protect BFF Main Branch
+      action: github:branch-protection:create
+      input:
+        repoUrl: github.com?owner=${{ parameters.repoOwner }}&repo=${{ steps['system-entity'].output.name }}-webapp-bff
+        branch: main
+        requiredApprovingReviewCount: 1
+
+    # --- Quay robot account (ARO deployment target only) ---------------------
+    - id: variablizer-quay
+      action: nestle:backstage:variablizer
+      name: Build Quay Variables
+      input:
+        variables:
+          host: quay.apps.ektnlbrn.westeurope.aroapp.io
+          quayRobotName: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('nestle.com/scope') }}_${{ steps['system-entity'].output.name | replace('-', '_')}}
+          organization: idp_devops
+          robotName: ${{ steps['system-entity'].output.name }}-webapp
+          quayRepositoryNameReact: ${{ steps['system-entity'].output.name }}/${{ steps['system-entity'].output.name }}-webapp-react
+          quayRepositoryNameBff: ${{ steps['system-entity'].output.name }}/${{ steps['system-entity'].output.name }}-webapp-bff
+          # Environments of the System, or an empty list outside ARO. The scaffolder
+          # renders `each` before it applies `if`, and fails the step when `each`
+          # resolves to nothing, so this step must run on every deployment target and
+          # hand the ARO-only steps below a list they can safely iterate.
+          environments: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('br.nestle.com/environments', true) if parameters.clusterType == 'aro' else [] }}
+
+    # Visibility is left at the action default, the same as the ARO Application
+    # template, so images stay readable inside the internal Quay instance.
+    - id: quay-create-repo-react
+      action: redhat-quay:create-repo
+      name: Create Quay Repositories - React
+      if: ${{ parameters.clusterType == 'aro' }}
+      input:
+        name: ${{ steps['variablizer-quay'].output.quayRepositoryNameReact }}
+        namespace: ${{ steps['variablizer-quay'].output.organization }}
+        description: Container images for ${{ steps['system-entity'].output.name }}-webapp-react, created from Backstage.
+
+    - id: quay-create-repo-bff
+      action: redhat-quay:create-repo
+      name: Create Quay Repositories - BFF
+      if: ${{ parameters.clusterType == 'aro' }}
+      input:
+        name: ${{ steps['variablizer-quay'].output.quayRepositoryNameBff }}
+        namespace: ${{ steps['variablizer-quay'].output.organization }}
+        description: Container images for ${{ steps['system-entity'].output.name }}-webapp-bff, created from Backstage.
+
+    - id: quay-create-robot-permission-react
+      action: redhat-quay:create-robot-permission
+      name: Grant Quay Robot Write Permission - React
+      if: ${{ parameters.clusterType == 'aro' }}
+      input:
+        repository: ${{ steps['variablizer-quay'].output.quayRepositoryNameReact }}
+        robot: ${{ steps['variablizer-quay'].output.quayRobotName }}
+        namespace: ${{ steps['variablizer-quay'].output.organization }}
+        role: write
+
+    - id: quay-create-robot-permission-bff
+      action: redhat-quay:create-robot-permission
+      name: Grant Quay Robot Write Permission - BFF
+      if: ${{ parameters.clusterType == 'aro' }}
+      input:
+        repository: ${{ steps['variablizer-quay'].output.quayRepositoryNameBff }}
+        robot: ${{ steps['variablizer-quay'].output.quayRobotName }}
+        namespace: ${{ steps['variablizer-quay'].output.organization }}
+        role: write
+
+    - id: push-gitops
+      name: Push GitOps Changes
+      action: github:extras:push
+      input:
+        repoUrl: ${{ steps['system-entity'].output.annotations['nestle.com/gitOpsRepoUrl'] }}
+        workingDirectory: gitops
+        gitAuthorName: ${{ user.entity.metadata.name if user.entity.metadata.name else 'backstage-bot' }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email if user.entity.spec.profile.email else 'backstage-bot@nestle.com' }}
+        gitCommitMessage: "chore: add webapp react+bff gitops manifests for ${{ steps['system-entity'].output.name }}"
+
+    - id: publish-catalog-pr
+      name: Catalog Pull Request
+      action: publish:github:pull-request
+      input:
+        repoUrl: ${{ parameters.repoUrl }}
+        branchName: webapp-react-bff-${{ steps['system-entity'].output.name }}-${{ "" | now | replace(":", "-") }}
+        title: Entity Creation - WebApp React + BFF (${{ steps['system-entity'].output.name }})
+        description: Create catalog resources for React + BFF provisioning
+        sourcePath: ./${{ steps['system-entity'].output.domain.split('/')[1] }}
+        targetPath: ${{ steps['system-entity'].output.domain.split('/')[1] }}
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+  output:
+    links:
+      - title: React Repository
+        url: ${{ steps['publish-react'].output.remoteUrl }}
+      - title: BFF Repository
+        url: ${{ steps['publish-bff'].output.remoteUrl }}
+      - title: GitOps Repository
+        url: ${{ steps['system-entity'].output.annotations['nestle.com/gitOpsRepoUrl'] }}
+      - title: Catalog Pull Request
+        url: ${{ steps['publish-catalog-pr'].output.remoteUrl }}

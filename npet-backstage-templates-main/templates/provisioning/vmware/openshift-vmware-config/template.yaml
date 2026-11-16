@@ -1,0 +1,198 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: openshift-vmware-config
+  title: OpenShift VMware Configuration Generator
+  description: |
+    Generates Ansible inventory variables for OpenShift on VMware deployments.
+    Auto-discovers VMware infrastructure from vCenter (datacenter, cluster, datastore,
+    VM folder, RHCOS template, networks). Publishes the configuration to a GitHub repository.
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - vmware
+    - openshift
+    - ansible
+    - configuration
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: configuration
+
+  parameters:
+    - title: OpenShift Cluster
+      required:
+        - clusterName
+        - clusterBaseDomain
+        - machineNetworkCidr
+      properties:
+        clusterName:
+          title: OCP Cluster Name
+          type: string
+          description: Short cluster identifier (e.g., usphoocp03)
+          pattern: '^[a-z][a-z0-9]+$'
+        clusterBaseDomain:
+          title: Base Domain
+          type: string
+          description: DNS base domain (e.g., pho.us.nestle.com)
+        machineNetworkCidr:
+          title: Machine Network CIDR
+          type: string
+          description: Machine network CIDR (e.g., 10.134.238.0/26)
+          pattern: '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}$'
+
+    - title: Worker Pool Networks
+      description: Select the vCenter networks to use as worker pool nodes. Each selected network becomes one worker pool in the Ansible inventory. Leave empty to auto-discover all available networks.
+      properties:
+        selectedNetworks:
+          title: Worker Pool Networks
+          type: array
+          description: Networks from vCenter to assign as worker pools (optional — leave empty to use all available networks)
+          ui:field: VmwareNetworkPicker
+          items:
+            type: object
+
+  steps:
+    # Step 1: Determine GitHub org based on environment (prod vs dev)
+    - action: nestle:backstage-hostname-lookup
+      id: hostname-lookup
+      name: Hostname Lookup
+
+    - action: nestle:backstage:variablizer
+      id: variablizer-repo
+      name: Set Repository Variables
+      input:
+        variables:
+          name: ${{ parameters.clusterName }}-vmware-config
+          organization: ${{ 'nestle-it' if 'idp.nestle.com' in steps['hostname-lookup'].output.hostname else 'nestle-devtest' }}
+
+    # Step 2: Discover VMware resources and resolve paths.
+    #         No selectedNetworks → auto-discovers ALL usable networks with 1 replica each.
+    - id: resolve-paths
+      name: Discover & Resolve VMware Paths
+      action: vmware:resource:resolve-paths
+      input:
+        templatePattern: rhcos
+        ocpClusterName: ${{ parameters.clusterName }}
+        baseDomain: ${{ parameters.clusterBaseDomain }}
+        selectedNetworks: ${{ parameters.selectedNetworks }}
+
+    # Step 3: Log what was discovered
+    - id: log-resolved
+      name: Log Resolved Configuration
+      action: debug:log
+      input:
+        message: |
+          VMware Resource Resolution:
+          - vCenter: ${{ steps['resolve-paths'].output.vcenterHostname }}
+          - Datacenter: ${{ steps['resolve-paths'].output.datacenterPath }}
+          - Cluster: ${{ steps['resolve-paths'].output.clusterPath }}
+          - Datastore: ${{ steps['resolve-paths'].output.datastorePath }}
+          - VM Folder: ${{ steps['resolve-paths'].output.vmFolderPath }}
+          - Template: ${{ steps['resolve-paths'].output.templateName }} (found: ${{ steps['resolve-paths'].output.templateFound }})
+          - Control Plane Network: ${{ steps['resolve-paths'].output.controlplaneNetworkName }}
+          - Worker Pools: ${{ steps['resolve-paths'].output.workerPools | length }} auto-discovered
+          - Zone: ${{ steps['resolve-paths'].output.zone }}
+          - API IP: ${{ steps['resolve-paths'].output.clusterApiIp }} (DNS resolved: ${{ steps['resolve-paths'].output.dnsResolved }})
+          - Ingress IP: ${{ steps['resolve-paths'].output.clusterIngressIp }}
+
+    # Step 4: Generate Ansible inventory file from Nunjucks template
+    - id: generate-config
+      name: Generate Ansible Inventory Variables
+      action: fetch:template
+      input:
+        url: ./content
+        templateFileExtension: true
+        values:
+          clusterName: ${{ parameters.clusterName }}
+          # Static values
+          kvVaultUri: "https://glblprdccacmglobalhubkey.vault.azure.net/"
+          kvPullsecret: hqvev-pull-secret
+          kvSshPublicKey: hqvevocp-ssh-public-key
+          ocpOsImageUrl: "https://mirror.openshift.com/pub/openshift-v4/dependencies/rhcos/4.18/latest/rhcos-4.18.27-x86_64-vmware.x86_64.ova"
+          # Zone-based KeyVault secrets (derived from datacenter path)
+          kvVcenterUsername: ${{ steps['resolve-paths'].output.kvVcenterUsername }}
+          kvVcenterPassword: ${{ steps['resolve-paths'].output.kvVcenterPassword }}
+          # DNS-resolved IPs
+          clusterApiIp: ${{ steps['resolve-paths'].output.clusterApiIp }}
+          clusterIngressIp: ${{ steps['resolve-paths'].output.clusterIngressIp }}
+          dnsResolved: ${{ steps['resolve-paths'].output.dnsResolved }}
+          # vCenter auto-discovered
+          vcenterHostname: ${{ steps['resolve-paths'].output.vcenterHostname }}
+          datacenterPath: ${{ steps['resolve-paths'].output.datacenterPath }}
+          clusterPath: ${{ steps['resolve-paths'].output.clusterPath }}
+          datastorePath: ${{ steps['resolve-paths'].output.datastorePath }}
+          vmFolderPath: ${{ steps['resolve-paths'].output.vmFolderPath }}
+          templateName: ${{ steps['resolve-paths'].output.templateName }}
+          templateFound: ${{ steps['resolve-paths'].output.templateFound }}
+          templatePattern: rhcos
+          controlplaneNetworkName: ${{ steps['resolve-paths'].output.controlplaneNetworkName }}
+          workerPools: ${{ steps['resolve-paths'].output.workerPools }}
+          # User-provided
+          clusterBaseDomain: ${{ parameters.clusterBaseDomain }}
+          machineNetworkCidr: ${{ parameters.machineNetworkCidr }}
+
+    # Step 5: Check if repo already exists
+    - id: github-repo-get
+      action: github:repo:get
+      name: Check if Repository Exists
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer-repo'].output.organization }}&repo=${{ steps['variablizer-repo'].output.name }}
+
+    # Step 6a: Create new repository if it doesn't exist
+    - id: github-repository-create
+      action: publish:github
+      name: Create GitHub Repository
+      if: ${{ steps['github-repo-get'].output.exists == false }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer-repo'].output.organization }}&repo=${{ steps['variablizer-repo'].output.name }}
+        defaultBranch: main
+        description: "OpenShift VMware Ansible inventory for cluster ${{ parameters.clusterName }}"
+        repoVisibility: internal
+
+    # Step 6b: Update existing repository via Pull Request
+    - id: github-repository-update
+      action: publish:github:pull-request
+      name: Update GitHub Repository
+      if: ${{ steps['github-repo-get'].output.exists }}
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer-repo'].output.organization }}&repo=${{ steps['variablizer-repo'].output.name }}
+        branchName: update-${{ parameters.clusterName }}-config
+        title: "Update VMware config for ${{ parameters.clusterName }}"
+        description: "Ansible inventory variables updated by Backstage scaffolder."
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+  output:
+    links:
+      - title: GitHub Repository
+        url: ${{ steps['github-repository-create'].output.remoteUrl }}
+        if: ${{ steps['github-repo-get'].output.exists == false }}
+        icon: github
+
+      - title: GitHub Pull Request
+        url: ${{ steps['github-repository-update'].output.remoteUrl }}
+        if: ${{ steps['github-repo-get'].output.exists }}
+        icon: github
+
+    text:
+      - title: Configuration Generated
+        content: |
+          ## OpenShift VMware Configuration for `${{ parameters.clusterName }}`
+
+          **VMware Infrastructure (auto-discovered from vCenter):**
+          - vCenter: `${{ steps['resolve-paths'].output.vcenterHostname }}`
+          - Datacenter: `${{ steps['resolve-paths'].output.datacenterPath }}`
+          - Compute Resource: `${{ steps['resolve-paths'].output.clusterPath }}`
+          - Datastore: `${{ steps['resolve-paths'].output.datastorePath }}`
+          - VM Folder: `${{ steps['resolve-paths'].output.vmFolderPath }}`
+          - RHCOS Template: `${{ steps['resolve-paths'].output.templateName }}` (found: ${{ steps['resolve-paths'].output.templateFound }})
+          - Control Plane Network: `${{ steps['resolve-paths'].output.controlplaneNetworkName }}`
+          - Worker Pools: ${{ steps['resolve-paths'].output.workerPools | length }} auto-discovered
+
+          **Cluster Networking:**
+          - API VIP: `${{ steps['resolve-paths'].output.clusterApiIp }}` (DNS resolved: ${{ steps['resolve-paths'].output.dnsResolved }})
+          - Ingress VIP: `${{ steps['resolve-paths'].output.clusterIngressIp }}`
+          - Base Domain: `${{ parameters.clusterBaseDomain }}`
+          - Machine Network: `${{ parameters.machineNetworkCidr }}`
+          - Zone: `${{ steps['resolve-paths'].output.zone }}`

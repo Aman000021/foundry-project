@@ -1,0 +1,23 @@
+---
+apiVersion: monitoring.rhobs/v1
+kind: PodMonitor
+metadata:
+  labels:
+    mso: nestle-otel
+  name: nestle-otel-collector-podmonitor
+  namespace: openshift-monitoring
+spec:
+  podMetricsEndpoints:
+    - interval: 30s
+      path: /metrics
+      port: telemetry
+      scheme: http
+      scrapeTimeout: 10s
+    - interval: 30s
+      path: /metrics
+      port: prome-export
+      scheme: http
+      scrapeTimeout: 10s
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nestle-otel-collector

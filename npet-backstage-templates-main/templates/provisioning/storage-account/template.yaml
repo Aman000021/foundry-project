@@ -1,0 +1,185 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: provisioning-create-storage-account
+  title: Storage Account
+  description: |
+    Create an Azure storage account to securely store and manage your data.
+    It is designed to simplify the creation of containers, queues and file shares.
+  annotations:
+    nestle.com/template-visibility: private
+    nestle.com/template-scope: regional
+  tags:
+    - azure
+    - storageaccount
+    - resources
+    - regional
+spec:
+  owner: group:default/aad-sg-backstage-ams-admins
+  type: cloud-template
+
+  parameters:
+    - $yaml: ../../../parameters/provisioning/regional-system-picker.yaml
+
+    - title: Provide information about the storage account
+      required:
+        - storageName
+      properties:
+        storageName:
+          title: Storage Account Name
+          type: string
+          description: Name for the storage account (3-24 lowercase letters and numbers only).
+          pattern: "^[a-z0-9]{3,24}$"
+          ui:help: Azure naming constraint — no uppercase or special characters
+        accountKind:
+          title: Kind
+          type: string
+          default: StorageV2
+
+    - title: Provide information about containers
+      properties:
+        storagecontainers:
+          title: Add Containers
+          type: array
+          default: []
+          items:
+            type: object
+            required:
+              - name
+              - storageContainerDaysUntilDelete
+            properties:
+              type:
+                type: string
+                default: storagecontainer
+                ui:widget: hidden
+              name:
+                title: Container Name
+                type: string
+              storageContainerDaysUntilDelete:
+                title: Days until created files are deleted
+                type: number
+                description: Set -1 to ignore deletion rule.
+                default: -1
+                enum:
+                  - -1
+                  - 0
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 10
+                  - 15
+                  - 30
+                  - 60
+                  - 90
+
+    - title: Provide information about queues
+      properties:
+        storagequeues:
+          title: Add your Storage Queues
+          type: array
+          default: []
+          items:
+            type: object
+            required:
+              - name
+            properties:
+              type:
+                type: string
+                default: storagequeue
+                ui:widget: hidden
+              name:
+                title: Queue Name
+                type: string
+
+    - title: Provide information about file shares
+      properties:
+        storagefileshares:
+          title: Add your Storage Fileshares
+          type: array
+          default: []
+          items:
+            type: object
+            required:
+              - name
+              - quotaGB
+            properties:
+              type:
+                type: string
+                default: storagefileshare
+                ui:widget: hidden
+              name:
+                title: Fileshare Name
+                type: string
+              quotaGB:
+                title: Fileshare Quota (GB)
+                type: number
+                default: 10
+                enum:
+                  - 10
+                  - 50
+
+  steps:
+    - $yaml: ../../../steps/catalog/assert-system-techlead-create.yaml
+
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.system }}
+
+    - id: create-resource-yaml
+      name: Scaffold Storage Account Entity
+      action: fetch:template:file
+      input:
+        url: ./content/resource.yaml.njk
+        targetPath: >-
+          ./${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/resources/${{ parameters.storageName }}.yaml
+        values:
+          name: ${{ parameters.storageName }}
+          namespace: ${{ steps['system-entity'].output.name }}
+          description: Storage account ${{ parameters.storageName }}
+          visibility: private
+          type: storage-account
+          owner: ${{ steps['system-entity'].output.owner }}
+          domain: ${{ steps['system-entity'].output.domain }}
+          system: system:${{ steps['system-entity'].output.namespace }}/${{ steps['system-entity'].output.name }}
+          dependsOn: []
+          annotations:
+            - key: nestle.com/resource-type
+              value: storage-account
+            - key: nestle.com/system-type
+              value: regional
+            - key: nestle.com/parent-system
+              value: system:${{ steps['system-entity'].output.namespace }}/${{ steps['system-entity'].output.name }}
+            - key: br.nestle.com/created-at
+              value: ${{ "" | now }}
+            - key: br.nestle.com/domain
+              value: ${{ steps['system-entity'].output.name.split('-')[0] }}
+            - key: br.nestle.com/account-kind
+              value: ${{ parameters.accountKind }}
+            - key: br.nestle.com/children
+              value: ${{ parameters.storagecontainers.concat(parameters.storagequeues).concat(parameters.storagefileshares) | dump }}
+          tags:
+            - storageaccount
+
+    - $yaml: ../../../steps/catalog/get-entities-config.yaml
+
+    - id: publish-resource
+      name: Create PR in catalog repo
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ steps.getEntitiesConfig.output.entities.repoName }}
+        branchName: storageaccount-creation-${{ parameters.storageName }}
+        title: "Storage Account - ${{ parameters.storageName }}"
+        description: "Backstage Storage Account ${{ parameters.storageName }} creation"
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+  output:
+    links:
+      - title: Catalog Pull Request
+        url: ${{ steps['publish-resource'].output.remoteUrl }}

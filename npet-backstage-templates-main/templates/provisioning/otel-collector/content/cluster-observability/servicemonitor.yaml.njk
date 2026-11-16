@@ -1,0 +1,26 @@
+---
+apiVersion: monitoring.rhobs/v1
+kind: ServiceMonitor
+metadata:
+  name: kube-state-metrics
+  namespace: openshift-monitoring
+  labels:
+    mso: nestle-otel
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kube-state-metrics
+  namespaceSelector:
+    matchNames: ["openshift-monitoring"]
+  endpoints:
+    - port: https-main
+      interval: 30s
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      metricRelabelings:
+        - action: replace
+          replacement: ${{ values.clusterName }}
+          targetLabel: cluster
+      tlsConfig:
+        insecureSkipVerify: true
+      honorLabels: true

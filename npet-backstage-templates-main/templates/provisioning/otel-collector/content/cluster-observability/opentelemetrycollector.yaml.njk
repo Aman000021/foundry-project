@@ -1,0 +1,239 @@
+{#- Traces of namespaces the generated tenants component does not map to an
+    application go to this Tempo tenant. -#}
+{%- set fallbackTenant = 'platform' -%}
+---
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: nestle-otel-collector
+  namespace: openshift-monitoring
+  labels:
+    app.kubernetes.io/name: nestle-otel-collector
+spec:
+  mode: deployment
+  replicas: ${{ values.collectorReplicas }}
+  managementState: managed
+  upgradeStrategy: automatic
+  ipFamilyPolicy: SingleStack
+  configVersions: 3
+  serviceAccount: nestle-otel-collector
+  resources:
+    requests:
+      cpu: 500m
+      memory: 3Gi
+    limits:
+      cpu: '1'
+      memory: 6Gi
+  image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.108.0
+  env:
+    - name: AZUREMONITOR_CONNECTION_STRING
+      valueFrom:
+        secretKeyRef:
+          name: ${{ values.azureMonitorSecretName }}
+          key: connection_string
+  ports:
+    - name: telemetry
+      port: 8887
+      protocol: TCP
+    - name: prome-export
+      port: 8889
+      protocol: TCP
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+    extensions:
+      # Projected ServiceAccount token; Tempo and Loki gateways authorize it via RBAC.
+      bearertokenauth:
+        filename: /var/run/secrets/kubernetes.io/serviceaccount/token
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 20
+      k8sattributes:
+        auth_type: serviceAccount
+        extract:
+          labels:
+            # Namespace "environment" label (DV/TST/PP/PR), to filter environments
+            # inside an application's tenant.
+            - from: namespace
+              key: environment
+              tag_name: k8s.namespace.labels.environment
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.ip
+          - sources:
+              - from: connection
+      resource:
+        attributes:
+          - action: upsert
+            key: cluster.name
+            value: ${{ values.clusterName }}
+      transform/tenant:
+        error_mode: ignore
+{%- for signal in ['log', 'trace', 'metric'] %}
+        ${{ signal }}_statements:
+          - context: resource
+            statements:
+              - 'set(attributes["tenant"], "${{ fallbackTenant }}")'
+{%- endfor %}
+      # One statement per application, namespaces -> tenant. Filled by the
+      # tenants/ component the observability-update workflow generates.
+      transform/tenant-apps:
+        error_mode: ignore
+        log_statements: []
+        trace_statements: []
+        metric_statements: []
+      # Tenant and cluster as Prometheus labels.
+      transform/metric-labels:
+        error_mode: ignore
+        metric_statements:
+          - context: datapoint
+            statements:
+              - 'set(attributes["tenant"], resource.attributes["tenant"])'
+              - 'set(attributes["cluster"], resource.attributes["cluster.name"])'
+      # OpenShift logging attribute names, so Loki queries match the console.
+      resource/loki:
+        attributes:
+          - key: kubernetes.namespace_name
+            from_attribute: k8s.namespace.name
+            action: upsert
+          - key: kubernetes.pod_name
+            from_attribute: k8s.pod.name
+            action: upsert
+          - key: kubernetes.container_name
+            from_attribute: k8s.container.name
+            action: upsert
+          - key: openshift.log.type
+            value: application
+            action: upsert
+          - key: log_type
+            value: application
+            action: upsert
+      batch:
+        send_batch_size: 512
+        send_batch_max_size: 1024
+        timeout: 5s
+    connectors:
+      # One route and one Tempo exporter per application tenant are added by the
+      # generated tenants/ component, copied from the fallback ones below.
+      routing/traces:
+        default_pipelines: [traces/${{ fallbackTenant }}]
+        error_mode: ignore
+        table:
+          - statement: route() where attributes["tenant"] == "${{ fallbackTenant }}"
+            pipelines: [traces/${{ fallbackTenant }}]
+    exporters:
+      azuremonitor:
+        connection_string: ${AZUREMONITOR_CONNECTION_STRING}
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+      otlp/tempo-${{ fallbackTenant }}:
+        endpoint: tempo-simplest-gateway.openshift-tempo-operator.svc:8090
+        auth:
+          authenticator: bearertokenauth
+        headers:
+          X-Scope-OrgID: ${{ fallbackTenant }}
+        tls:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 300s
+        sending_queue:
+          enabled: true
+          queue_size: 1000
+      otlphttp/loki:
+        endpoint: https://logging-loki-gateway-http.openshift-logging.svc:8080/api/logs/v1/application/otlp
+        encoding: json
+        auth:
+          authenticator: bearertokenauth
+        tls:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+    service:
+      extensions: [bearertokenauth]
+      pipelines:
+        traces/in:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, resource, transform/tenant, transform/tenant-apps, batch]
+          exporters: [azuremonitor, routing/traces]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, resource, transform/tenant, transform/tenant-apps, resource/loki, batch]
+          exporters: [azuremonitor, otlphttp/loki]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, resource, transform/tenant, transform/tenant-apps, transform/metric-labels, batch]
+          exporters: [prometheus]
+        traces/${{ fallbackTenant }}:
+          receivers: [routing/traces]
+          exporters: [otlp/tempo-${{ fallbackTenant }}]
+      telemetry:
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8887
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nestle-otel-collector
+  namespace: openshift-monitoring
+spec:
+  selector:
+    app.kubernetes.io/name: nestle-otel-collector
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+
+---
+# Opens only the collector ports, from any namespace, so the collector stays
+# reachable even if the namespace gets a default-deny policy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nestle-otel-collector
+  namespace: openshift-monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: opentelemetry-collector
+      app.kubernetes.io/instance: openshift-monitoring.nestle-otel-collector
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - { protocol: TCP, port: 4317 }
+        - { protocol: TCP, port: 4318 }
+        - { protocol: TCP, port: 8887 }
+        - { protocol: TCP, port: 8889 }
+{%- if values.exposeCollector %}
+
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: nestle-otel-http
+  namespace: openshift-monitoring
+  labels:
+    app.kubernetes.io/name: nestle-otel-collector
+spec:
+  to:
+    kind: Service
+    name: nestle-otel-collector
+  port:
+    targetPort: otlp-http
+  tls:
+    termination: edge
+  wildcardPolicy: None
+{%- endif %}

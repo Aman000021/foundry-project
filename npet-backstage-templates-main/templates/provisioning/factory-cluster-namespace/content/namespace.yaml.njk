@@ -1,0 +1,60 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${{ values.name | lower }}-admin
+  namespace: ${{ values.name | lower }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: ${{ values.namespaceOwnerGroup }}
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${{ values.name | lower }}
+  labels:
+    argocd.argoproj.io/managed-by: openshift-gitops
+    nestle.com/application-namespace: "true"
+    nestle.com/ingress-apps-${{ values.vlanId }}: "true"
+    apmid: "${{ values.apmId | default('') | upper | replace(' ', '') }}"
+    technical_owner: "${{ values.technicalOwner.split('@')[0] | lower | replace('.', '_') }}_${{ values.technicalOwner.split('@')[1] | default('') | lower | replace('.com', '') | replace('.', '_') }}"
+    environment: "${{ values.environment | upper }}"
+    application: "${{ values.applicationName | lower | replace(' ', '-') }}"
+  annotations:
+    openshift.io/node-selector: "vlan=${{ values.vlanId }}"
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ${{ values.name | lower }}-rq
+  namespace: ${{ values.name | lower }}
+spec:
+  hard:
+    requests.cpu: "${{ values.quotaRequestsCpu }}"
+    requests.memory: ${{ values.quotaRequestsMemory }}
+    pods: "${{ values.quotaPods }}"
+    persistentvolumeclaims: "${{ values.quotaPvcs }}"
+    requests.storage: ${{ values.quotaStorage }}
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ${{ values.name | lower }}-lr
+  namespace: ${{ values.name | lower }}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: ${{ values.limitDefaultCpu }}
+        memory: ${{ values.limitDefaultMemory }}
+      defaultRequest:
+        cpu: ${{ values.limitRequestCpu }}
+        memory: ${{ values.limitRequestMemory }}

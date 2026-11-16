@@ -1,0 +1,110 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: azure-pipeline-run-dns-creation-debug
+  title: Run Azure DNS Creation - DEBUG
+  description: Runs the Azure DevOps Pipeline to create a DNS record for the certificate.
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - cpw
+    - azure
+    - dns
+    - debug
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: cloud-template
+
+  parameters:
+    - title: Parameters
+      required:
+        - resourceGroupRef
+      properties:
+        resourceGroupRef:
+          title: Parent ResourceGroup
+          description: ResourceGroup to associate the Subnet to.
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: Resource
+                spec.type: resource-group
+
+  steps:
+    - action: catalog:get:entity:data
+      id: resource-group-entity
+      name: Get ResourceGroup Entity
+      input:
+        ref: ${{ parameters.resourceGroupRef }}
+
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('nestle.com/parent-system') }}
+
+    - action: debug:log
+      id: write-debug-line-certificate-params
+      name: Output Certificate Creation Parameters
+      input:
+        message: |
+          System entity information:
+          - requestor: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('requester') }}
+          - scope: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('scope') }}
+
+
+          - Subscription_name: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('subscription-name') }}
+          - ResourceGroup_Name: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('resource-group-name') }}
+          - region: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('region') }}
+
+          - solutionName: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}
+          - environmentName: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('environment-name') }}
+          - context: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}
+          - servername: "${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('environment-name') }}${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}"
+          - certname: "${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('environment-name') }}${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}"
+          - TICKET: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('ticket') }}
+
+    - action: debug:log
+      id: write-debug-line-cidr
+      name: Output CIDR
+      input:
+        message: |
+          - ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('CIDR') }}
+          - ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('CIDR') | calculateDnsIp }}
+
+    - action: debug:log
+      id: write-debug-line-umi-federation
+      name: Output UMI Federation data
+      each: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('umi-federation', true) }}
+      input:
+        message: |
+          UMI Federation ${{ each.key }}:
+          - principal_id: ${{ each.value.principal_id | string }}
+
+    - id: dns-run
+      action: azure:pipeline:run
+      input:
+        organization: nestle-it
+        project: STIG
+        pipelineId: 1336
+        branch: feat/NPET_dev
+        waitForPipelineCompletion: true
+        pipelineParameters:
+          dns_records: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') | string }}${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('environment-name') | string }}${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') | string }}
+          dns_values: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('CIDR') | calculateDnsIp}}
+          ticket: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('ticket') }}
+          u_requestor: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('requester') }}
+          req_type: Create
+          branchName: feat/NPET_dev
+          record_type: A
+          dns_zones: nestle.com
+        debug:
+          skipQueue: true
+          buildId: 3281275
+
+  output:
+    links:
+      - title: Workflow Url
+        url: ${{ steps['pipeline-run'].output.workflowUrl }}

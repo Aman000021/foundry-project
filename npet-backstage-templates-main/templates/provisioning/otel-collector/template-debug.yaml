@@ -1,0 +1,532 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: provisioning-deploy-otel-collector-debug
+  title: Deploy OTEL Collector in OpenShift - DEBUG
+  description: |
+    **DEBUG version** — opens the PR against the mock repo `nestle-devtest/ribamar-king-of-techdocs`
+    instead of `glbl-pr-dccacmglobalhub-01`, to inspect the generated files.
+
+    Deploys the full cluster observability stack to an OpenShift cluster via a GitOps PR.
+
+    This template provisions:
+    - OpenTelemetry Collector (deployment mode) with Azure Monitor exporter
+    - MonitoringStack (Prometheus with OTLP receiver, optional Azure Monitor remote-write)
+    - ClusterLogForwarder sending the logs of every application namespace to Loki
+    - ClusterLogForwarder for application error logs (Azure Monitor Logs Ingestion), for namespaces labelled
+      `nestle.com/forward-logs: "true"`. Until the region provides the Logs Ingestion values it is generated
+      with placeholders and `managementState: Unmanaged`
+    - ACM ConfigurationPolicies to copy secrets from hub to the target cluster
+    - PodMonitor and ServiceMonitor for collector self-monitoring
+    - Hub ExternalSecrets that source those secrets from Key Vault
+    - Loki, Tempo and Grafana, on per-cluster containers in the region's Azure storage account, with one
+      Tempo tenant per application (generated from the cluster's namespaces by the observability-update workflow)
+
+    Settings are read from the selected cluster entity and, for what it does not set, from its
+    observability region entity (`nestle.com/observability-region`).
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - observability
+    - opentelemetry
+    - debug
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: cloud-template
+
+  parameters:
+    - title: Cluster Selection
+      required:
+        - clusterRef
+      properties:
+        clusterRef:
+          title: OpenShift Cluster
+          description: |
+            Only clusters with a `nestle.com/gitops-path` annotation are listed.
+            The GitOps path, Azure Monitor workspace group and remote-write URL come from the entity.
+          type: string
+          ui:field: EntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+                spec.type: kubernetes-cluster
+                metadata.annotations.nestle.com/gitops-path: { exists: true }
+        argoRepoUrl:
+          title: GitOps Repository
+          type: string
+          ui:field: RepoUrlPicker
+          ui:widget: hidden
+          # DEBUG: mock repo that stands in for glbl-pr-dccacmglobalhub-01.
+          default: github.com?owner=nestle-devtest&repo=ribamar-king-of-techdocs
+          ui:options:
+            allowedHosts:
+              - github.com
+            allowedOwners:
+              - nestle-devtest
+            allowedRepos:
+              - ribamar-king-of-techdocs
+
+    - title: Advanced (optional)
+      properties:
+        secretSourceNamespace:
+          title: Secret Source Namespace Override
+          description: |
+            ACM hub namespace to copy secrets FROM. Leave blank to use
+            `<cluster folder name>-policies`, which is the repo-wide convention.
+          type: string
+        loggingChannel:
+          title: Cluster Logging Operator Channel
+          type: string
+          default: "stable-6.3"
+        collectorReplicas:
+          title: Collector Replicas
+          type: integer
+          default: 2
+          minimum: 1
+          maximum: 10
+        exposeCollector:
+          title: Expose Collector Outside the Cluster
+          description: |
+            Adds an unauthenticated OTLP/HTTP Route. Only needed for senders outside the cluster;
+            in-cluster apps use the service name.
+          type: boolean
+          default: false
+
+  steps:
+    - action: catalog:get:entity:data
+      id: cluster-entity
+      name: Get Cluster Entity
+      input:
+        ref: ${{ parameters.clusterRef }}
+
+    # Per-region settings (storage, Key Vault, Log Analytics, App Insights) live on a
+    # region entity the cluster points to; the cluster's own annotations win.
+    - action: catalog:get:entity:data
+      id: region-entity
+      if: ${{ steps['cluster-entity'].output.annotations | parseEntityAnnotations('nestle.com/observability-region') }}
+      name: Get Observability Region Entity
+      input:
+        ref: ${{ steps['cluster-entity'].output.annotations | parseEntityAnnotations('nestle.com/observability-region') }}
+
+    - action: nestle:backstage:variablizer
+      id: annotations
+      name: Merge Cluster and Region Annotations
+      input:
+        variables:
+          merged: ${{ steps['cluster-entity'].output.annotations.concat(steps['region-entity'].output.annotations or []) }}
+
+    - action: nestle:backstage:variablizer
+      id: cluster-context
+      name: Read Cluster Annotations
+      input:
+        variables:
+          gitopsBasePath: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/gitops-path') }}
+          workspaceGroup: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/azure-monitor-workspace-group') }}
+          remoteWriteUrl: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/prometheus-remote-write-url') }}
+          # Entra app Prometheus signs in with for remote write, and the Key Vault secret holding its client secret.
+          remoteWriteClientId: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/prometheus-remote-write-client-id') }}
+          remoteWriteSecret: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/prometheus-remote-write-secret') }}
+          storageSubscriptionId: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/observability-storage-subscription-id') }}
+          storageResourceGroup: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/observability-storage-resource-group') }}
+          storageAccount: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/observability-storage-account') }}
+          # Application logs go to Azure only when the cluster has a Logs Ingestion destination.
+          logsIngestionUrl: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/logs-ingestion-url') }}
+          logsIngestionDcrId: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/logs-ingestion-dcr-id') }}
+          logsIngestionStream: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/logs-ingestion-stream') }}
+          logsIngestionClientId: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/logs-ingestion-client-id') }}
+          logsIngestionSecret: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/logs-ingestion-secret') }}
+          # Key Vault secret holding the App Insights connection string; without it the
+          # workspace group's shared secret is used.
+          appInsightsSecret: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/app-insights-secret') }}
+          # Resource ID of the global Key Vault the hub reads (glblprdccacmglobalhubkey). When set,
+          # the storage workflow stores the storage key there; otherwise it is a manual step.
+          keyVaultId: ${{ steps['annotations'].output.merged | parseEntityAnnotations('nestle.com/key-vault-id') }}
+
+    - action: nestle:error
+      id: fail-if-invalid-workspace-group
+      if: ${{ not steps['cluster-context'].output.appInsightsSecret and not (steps['cluster-context'].output.workspaceGroup in ['nexus', 'fofo']) }}
+      name: Fail If App Insights Is Not Set
+      input:
+        error: |
+          Error: set `nestle.com/app-insights-secret` (cluster or region entity), or `nestle.com/azure-monitor-workspace-group`
+          to `nexus` or `fofo` on the cluster entity.
+
+    - action: nestle:error
+      id: fail-if-storage-annotations-missing
+      if: ${{ not (steps['cluster-context'].output.storageResourceGroup and steps['cluster-context'].output.storageAccount) }}
+      name: Fail If Storage Annotations Are Missing
+      input:
+        error: |
+          Error: Loki, Tempo and Grafana need the region's Azure storage account. Set these annotations on the
+          region (or cluster) entity: nestle.com/observability-storage-resource-group and nestle.com/observability-storage-account.
+
+    - action: nestle:error
+      id: fail-if-logs-ingestion-incomplete
+      if: ${{ (steps['cluster-context'].output.logsIngestionUrl or steps['cluster-context'].output.logsIngestionDcrId or steps['cluster-context'].output.logsIngestionStream or steps['cluster-context'].output.logsIngestionClientId or steps['cluster-context'].output.logsIngestionSecret) and not (steps['cluster-context'].output.logsIngestionUrl and steps['cluster-context'].output.logsIngestionDcrId and steps['cluster-context'].output.logsIngestionStream and steps['cluster-context'].output.logsIngestionClientId and steps['cluster-context'].output.logsIngestionSecret) }}
+      name: Fail If Logs Ingestion Annotations Are Incomplete
+      input:
+        error: |
+          Error: set all or none of these region (or cluster) entity annotations: nestle.com/logs-ingestion-url,
+          nestle.com/logs-ingestion-dcr-id, nestle.com/logs-ingestion-stream, nestle.com/logs-ingestion-client-id
+          and nestle.com/logs-ingestion-secret (Key Vault secret holding the client secret).
+
+    - action: nestle:backstage:variablizer
+      id: variablizer
+      name: Build Deployment Variables
+      input:
+        variables:
+          # ACM cluster name == the last segment of the GitOps path.
+          # Verified against every cluster's policyGenerator.yaml in the repo.
+          clusterName: ${{ steps['cluster-context'].output.gitopsBasePath.split('/') | last }}
+          clusterPoliciesNamespace: ${{ steps['cluster-context'].output.gitopsBasePath.split('/') | last }}-policies
+          secretSourceNamespace: ${{ parameters.secretSourceNamespace if parameters.secretSourceNamespace else (steps['cluster-context'].output.gitopsBasePath.split('/') | last) ~ '-policies' }}
+          azureMonitorSecretName: >-
+            {%- if steps['cluster-context'].output.appInsightsSecret -%}
+            ${{ steps['cluster-context'].output.appInsightsSecret }}
+            {%- elif steps['cluster-context'].output.workspaceGroup == 'nexus' -%}
+            azuremonitor-nexus-instrumentation-secret
+            {%- else -%}
+            azuremonitor-instrumentation-secret
+            {%- endif -%}
+          # Cluster annotation wins; nexus clusters share one DCR, so they fall
+          # back to it. fofo clusters without an annotation get no remote write.
+          prometheusRemoteWriteUrl: >-
+            {%- if steps['cluster-context'].output.remoteWriteUrl -%}
+            ${{ steps['cluster-context'].output.remoteWriteUrl }}
+            {%- elif steps['cluster-context'].output.workspaceGroup == 'nexus' -%}
+            https://glbl-pr-nexusobservability-euwe-dce-xlkz.westeurope-1.metrics.ingest.monitor.azure.com/dataCollectionRules/dcr-a4052bbf03bd41b1a0e02744fc20d050/streams/Microsoft-PrometheusMetrics/api/v1/write?api-version=2023-04-24
+            {%- endif -%}
+          # Without the annotations, the edge Entra app and its Key Vault secret.
+          prometheusRemoteWriteClientId: ${{ steps['cluster-context'].output.remoteWriteClientId or 'caa3487c-4154-4155-8c6a-beb00e51fa6c' }}
+          prometheusRemoteWriteSecret: ${{ steps['cluster-context'].output.remoteWriteSecret or 'cluster-observability-monitoringstack-key' }}
+          gitopsDir: ${{ steps['cluster-context'].output.gitopsBasePath }}/observability
+          # Hub-side ExternalSecrets the copy-secret policies read from. Applied
+          # by the cluster's root kustomization (resources: secrets/).
+          secretsDir: ${{ steps['cluster-context'].output.gitopsBasePath }}/secrets/observability
+          # Key Vault secret names written by the observability-storage workflow.
+          storageSecretPrefix: ${{ steps['cluster-context'].output.gitopsBasePath.split('/') | last }}-observability-storage
+          # Logs Ingestion values come from the Observability team. Until they are on the region
+          # (or cluster) entity, the files get placeholders and the log forwarder stays Unmanaged.
+          logsIngestionConfigured: ${{ true if steps['cluster-context'].output.logsIngestionUrl else false }}
+          logsIngestionUrl: ${{ steps['cluster-context'].output.logsIngestionUrl or 'https://replace-me.ingest.monitor.azure.com' }}
+          logsIngestionDcrId: ${{ steps['cluster-context'].output.logsIngestionDcrId or 'REPLACE_ME_DCR_IMMUTABLE_ID' }}
+          logsIngestionStream: ${{ steps['cluster-context'].output.logsIngestionStream or 'REPLACE_ME_STREAM_NAME' }}
+          logsIngestionClientId: ${{ steps['cluster-context'].output.logsIngestionClientId or 'REPLACE_ME_CLIENT_ID' }}
+          logsIngestionSecret: ${{ steps['cluster-context'].output.logsIngestionSecret or 'replace-me-logs-ingestion-client-secret' }}
+          # All observability secrets live in the global vault, read by the hub store azkeyvault-secret-store.
+          keyVaultName: glblprdccacmglobalhubkey
+          # Nestle Entra tenant, for the Logs Ingestion client secret sign-in.
+          azureTenantId: 12a3af23-a769-4654-847f-958f3d479f4a
+          # One ../ per segment of the GitOps path, plus one more for the
+          # observability/ dir itself, to reach the repo root from the
+          # generated kustomization.yaml.
+          catalogRelativePath: >-
+            {%- for seg in steps['cluster-context'].output.gitopsBasePath.split('/') -%}../{%- endfor -%}../catalog/observability/openshift-logging/cluster-logging
+
+    - action: github:actions:dispatch-with-response
+      id: observability-storage
+      # Creates the containers. Needs the subscription; without it the PR lists them to create by hand.
+      if: ${{ steps['cluster-context'].output.storageSubscriptionId }}
+      name: Create Loki and Tempo Storage
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+        branchOrTagName: main
+        workflowId: observability-storage.yaml
+        waitForActionCompletion: true
+        timeout: 1800
+        workflowInputs:
+          clusterName: ${{ steps['variablizer'].output.clusterName }}
+          subscriptionId: ${{ steps['cluster-context'].output.storageSubscriptionId }}
+          resourceGroupName: ${{ steps['cluster-context'].output.storageResourceGroup }}
+          storageAccountName: ${{ steps['cluster-context'].output.storageAccount }}
+          keyVaultId: ${{ steps['cluster-context'].output.keyVaultId }}
+          # DEBUG: plan only, no Azure changes.
+          dryRun: true
+
+    - action: fetch:template:file
+      id: fetch-kustomization
+      name: Generate kustomization.yaml
+      input:
+        url: ./content/kustomization.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/kustomization.yaml
+        values:
+          catalogRelativePath: ${{ steps['variablizer'].output.catalogRelativePath }}
+
+    - action: fetch:template:file
+      id: fetch-patch-logging-channel
+      name: Generate cluster-logging channel patch
+      input:
+        url: ./content/patch-sub-channel-cluster-logging.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/patch-sub-channel-cluster-logging.yaml
+        values:
+          loggingChannel: ${{ parameters.loggingChannel }}
+
+    - action: fetch:template:file
+      id: fetch-sa-log-forwarding
+      name: Generate logging ServiceAccount
+      input:
+        url: ./content/cluster-logging/sa-log-forwarding.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/cluster-logging/sa-log-forwarding.yaml
+        values: {}
+
+    - action: fetch:template:file
+      id: fetch-log-forwarding
+      name: Generate ClusterLogForwarder
+      input:
+        url: ./content/cluster-logging/log-forwarding.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/cluster-logging/log-forwarding.yaml
+        values:
+          logsIngestionUrl: ${{ steps['variablizer'].output.logsIngestionUrl }}
+          logsIngestionDcrId: ${{ steps['variablizer'].output.logsIngestionDcrId }}
+          logsIngestionStream: ${{ steps['variablizer'].output.logsIngestionStream }}
+          logsIngestionClientId: ${{ steps['variablizer'].output.logsIngestionClientId }}
+          azureTenantId: ${{ steps['variablizer'].output.azureTenantId }}
+          logsIngestionConfigured: ${{ steps['variablizer'].output.logsIngestionConfigured }}
+
+    - action: fetch:template:file
+      id: fetch-logs-ingestion-copy-secret
+      name: Generate Logs Ingestion client secret copy-secret policy
+      input:
+        url: ./content/cluster-logging/azure-logs-ingestion-copy-secret.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/cluster-logging/azure-logs-ingestion-copy-secret.yaml
+        values:
+          clusterPoliciesNamespace: ${{ steps['variablizer'].output.clusterPoliciesNamespace }}
+          secretSourceNamespace: ${{ steps['variablizer'].output.secretSourceNamespace }}
+
+    - action: fetch:template:file
+      id: fetch-monitoringstack-copy-secret
+      name: Generate MonitoringStack OAuth copy-secret policy
+      input:
+        url: ./content/cluster-observability/monitoringstack-copy-secret.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/cluster-observability/monitoringstack-copy-secret.yaml
+        values:
+          clusterPoliciesNamespace: ${{ steps['variablizer'].output.clusterPoliciesNamespace }}
+          secretSourceNamespace: ${{ steps['variablizer'].output.secretSourceNamespace }}
+
+    - action: fetch:template:file
+      id: fetch-monitoringstack
+      name: Generate MonitoringStack
+      input:
+        url: ./content/cluster-observability/monitoringstack.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/cluster-observability/monitoringstack.yaml
+        values:
+          prometheusRemoteWriteUrl: ${{ steps['variablizer'].output.prometheusRemoteWriteUrl }}
+          prometheusRemoteWriteClientId: ${{ steps['variablizer'].output.prometheusRemoteWriteClientId }}
+          azureTenantId: ${{ steps['variablizer'].output.azureTenantId }}
+
+    - action: fetch:template:file
+      id: fetch-otel-copy-secret
+      name: Generate Azure Monitor connection string copy-secret policy
+      input:
+        url: ./content/cluster-observability/opentelemetrycollectory-copy-secret.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/cluster-observability/opentelemetrycollectory-copy-secret.yaml
+        values:
+          clusterPoliciesNamespace: ${{ steps['variablizer'].output.clusterPoliciesNamespace }}
+          secretSourceNamespace: ${{ steps['variablizer'].output.secretSourceNamespace }}
+          azureMonitorSecretName: ${{ steps['variablizer'].output.azureMonitorSecretName }}
+
+    - action: fetch:template:file
+      id: fetch-otel-collector
+      name: Generate OpenTelemetryCollector
+      input:
+        url: ./content/cluster-observability/opentelemetrycollector.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/cluster-observability/opentelemetrycollector.yaml
+        values:
+          collectorReplicas: ${{ parameters.collectorReplicas }}
+          exposeCollector: ${{ parameters.exposeCollector }}
+          azureMonitorSecretName: ${{ steps['variablizer'].output.azureMonitorSecretName }}
+          clusterName: ${{ steps['variablizer'].output.clusterName }}
+
+    - action: fetch:template:file
+      id: fetch-podmonitor
+      name: Generate PodMonitor
+      input:
+        url: ./content/cluster-observability/podmonitor.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/cluster-observability/podmonitor.yaml
+        values: {}
+
+    - action: fetch:template:file
+      id: fetch-servicemonitor
+      name: Generate ServiceMonitor
+      input:
+        url: ./content/cluster-observability/servicemonitor.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.gitopsDir }}/cluster-observability/servicemonitor.yaml
+        values:
+          clusterName: ${{ steps['variablizer'].output.clusterName }}
+
+    - action: fetch:template:file
+      id: fetch-secrets-kustomization
+      name: Generate hub secrets kustomization
+      input:
+        url: ./content/secrets/kustomization.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.secretsDir }}/kustomization.yaml
+        values: {}
+
+    - action: fetch:template:file
+      id: fetch-monitoringstack-externalsecret
+      name: Generate MonitoringStack OAuth ExternalSecret
+      input:
+        url: ./content/secrets/monitoringstack-secret.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.secretsDir }}/monitoringstack-secret.yaml
+        values:
+          secretSourceNamespace: ${{ steps['variablizer'].output.secretSourceNamespace }}
+          prometheusRemoteWriteSecret: ${{ steps['variablizer'].output.prometheusRemoteWriteSecret }}
+
+    - action: fetch:template:file
+      id: fetch-otel-externalsecret
+      name: Generate Azure Monitor connection string ExternalSecret
+      input:
+        url: ./content/secrets/opentelemetrycollector-secret.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.secretsDir }}/opentelemetrycollector-secret.yaml
+        values:
+          secretSourceNamespace: ${{ steps['variablizer'].output.secretSourceNamespace }}
+          azureMonitorSecretName: ${{ steps['variablizer'].output.azureMonitorSecretName }}
+
+    - action: fetch:template:file
+      id: fetch-logs-ingestion-externalsecret
+      name: Generate Logs Ingestion client secret ExternalSecret
+      input:
+        url: ./content/secrets/azure-logs-ingestion-secret.yaml.njk
+        targetPath: ./argo-content/${{ steps['variablizer'].output.secretsDir }}/azure-logs-ingestion-secret.yaml
+        values:
+          secretSourceNamespace: ${{ steps['variablizer'].output.secretSourceNamespace }}
+          logsIngestionSecret: ${{ steps['variablizer'].output.logsIngestionSecret }}
+          logsIngestionConfigured: ${{ steps['variablizer'].output.logsIngestionConfigured }}
+
+    - action: fetch:template
+      id: fetch-backends
+      name: Generate Loki, Tempo and Grafana
+      input:
+        url: ./content/backends
+        targetPath: ./argo-content/${{ steps['cluster-context'].output.gitopsBasePath }}
+        templateFileExtension: true
+        values:
+          clusterName: ${{ steps['variablizer'].output.clusterName }}
+          clusterPoliciesNamespace: ${{ steps['variablizer'].output.clusterPoliciesNamespace }}
+          secretSourceNamespace: ${{ steps['variablizer'].output.secretSourceNamespace }}
+          storageAccount: ${{ steps['cluster-context'].output.storageAccount }}
+          loggingChannel: ${{ parameters.loggingChannel }}
+          storageSecretPrefix: ${{ steps['variablizer'].output.storageSecretPrefix }}
+
+    - id: publish-gitops-pr
+      name: GitOps Pull Request
+      action: publish:github:pull-request
+      input:
+        repoUrl: ${{ parameters.argoRepoUrl }}
+        sourcePath: argo-content
+        branchName: otel-collector-${{ steps['variablizer'].output.clusterName }}
+        title: "observability: deploy OTEL Collector to ${{ steps['variablizer'].output.clusterName }}"
+        description: |
+          Deploys the cluster observability stack to `${{ steps['variablizer'].output.clusterName }}`.
+
+          **Included resources:**
+          - OpenTelemetry Collector (deployment, ${{ parameters.collectorReplicas }} replicas, ${{ 'external OTLP Route' if parameters.exposeCollector else 'in-cluster only' }}) and a NetworkPolicy for its ports
+          - MonitoringStack (Prometheus${{ ' + Azure Monitor remote-write' if steps['variablizer'].output.prometheusRemoteWriteUrl else ', no remote-write' }})
+          - Traces and OTLP logs to App Insights: Key Vault secret `${{ steps['variablizer'].output.azureMonitorSecretName }}`
+          - Application logs to Loki (all application namespaces, through the `loki-forwarder` ClusterLogForwarder)
+          - Application error logs to Azure (namespaces labelled `nestle.com/forward-logs: "true"`): ${{ ('Logs Ingestion stream `' ~ steps['cluster-context'].output.logsIngestionStream ~ '`') if steps['variablizer'].output.logsIngestionConfigured else '**not active yet**, see below' }}
+          - ACM ConfigurationPolicies for secret distribution
+          - PodMonitor + ServiceMonitor
+          - Hub ExternalSecrets (Key Vault) the copy-secret policies read from
+          - Loki and Tempo on storage account `${{ steps['cluster-context'].output.storageAccount }}` (containers `${{ steps['variablizer'].output.clusterName }}-loki`, `-tempo`), plus Grafana
+          - Tempo tenant `platform`; per-application tenants come from `observability/tenants/`, which the workflow generates
+
+          {%- if not (steps['cluster-context'].output.storageSubscriptionId and steps['cluster-context'].output.keyVaultId) %}
+
+          **Before merging**, for storage account `${{ steps['cluster-context'].output.storageAccount }}` (`${{ steps['cluster-context'].output.storageResourceGroup }}`):
+          {%- if not steps['cluster-context'].output.storageSubscriptionId %}
+          - create the blob containers `${{ steps['variablizer'].output.clusterName }}-loki` and `${{ steps['variablizer'].output.clusterName }}-tempo`
+          {%- endif %}
+          - store the account key in Key Vault `${{ steps['variablizer'].output.keyVaultName }}` as `${{ steps['variablizer'].output.storageSecretPrefix }}-key` (automated once the region entity sets `nestle.com/key-vault-id`)
+          {%- endif %}
+
+          {%- if not steps['variablizer'].output.logsIngestionConfigured %}
+
+          **Logs to Azure (Observability team):** the log forwarder is generated with placeholders and
+          `managementState: Unmanaged`, so it does nothing yet. To activate it, set these on the region entity
+          `${{ (steps['cluster-entity'].output.annotations | parseEntityAnnotations('nestle.com/observability-region')) or parameters.clusterRef }}`
+          and re-run this template (it regenerates both files):
+          - `nestle.com/logs-ingestion-url`: DCE logs ingestion endpoint
+          - `nestle.com/logs-ingestion-dcr-id`: DCR immutable ID
+          - `nestle.com/logs-ingestion-stream`: stream name
+          - `nestle.com/logs-ingestion-client-id`: client ID of the Entra app allowed to write to the DCR
+          - `nestle.com/logs-ingestion-secret`: Key Vault secret holding that app's client secret
+
+          Editing the files by hand also works (replace every `REPLACE_ME` / `replace-me` value in
+          `observability/cluster-logging/log-forwarding.yaml` and `secrets/observability/azure-logs-ingestion-secret.yaml`,
+          then set `managementState: Managed`), but the next template run overwrites them.
+          {%- endif %}
+
+          **Enabling:** this PR only adds new folders. Once merged, the
+          `observability-update` workflow generates `observability/tenants/` (one Tempo
+          tenant per application, from the cluster's namespaces), then registers
+          `observability/` in the cluster's `policyGenerator.yaml` and
+          `secrets/observability/` in `secrets/kustomization.yaml`.
+
+          **Cluster entity:** `${{ parameters.clusterRef }}`
+          **GitOps path:** `${{ steps['variablizer'].output.gitopsDir }}`
+          **Region entity:** `${{ (steps['cluster-entity'].output.annotations | parseEntityAnnotations('nestle.com/observability-region')) or 'none' }}`
+          **Secret source namespace:** `${{ steps['variablizer'].output.secretSourceNamespace }}`
+
+          Generated by Backstage IDP (DEBUG).
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+  output:
+    links:
+      - title: GitOps Pull Request
+        url: ${{ steps['publish-gitops-pr'].output.remoteUrl }}
+    text:
+      - title: Next steps
+        content: |
+          The pull request deploys nothing until it is merged. After the merge, the `observability-update`
+          workflow generates the per-application Tempo tenants and registers the folders on the cluster.
+
+          {%- if not steps['variablizer'].output.logsIngestionConfigured %}
+
+          **Logs to Azure are not active: placeholders to replace (Observability team)**
+
+          These files contain `REPLACE_ME` / `replace-me` values and the log forwarder is `Unmanaged`:
+          - `${{ steps['variablizer'].output.gitopsDir }}/cluster-logging/log-forwarding.yaml`
+          - `${{ steps['variablizer'].output.secretsDir }}/azure-logs-ingestion-secret.yaml`
+
+          Preferred: set `nestle.com/logs-ingestion-url`, `-dcr-id`, `-stream`, `-client-id` and `-secret` on
+          `${{ (steps['cluster-entity'].output.annotations | parseEntityAnnotations('nestle.com/observability-region')) or parameters.clusterRef }}`
+          and run this template again; it fills both files and switches the forwarder on.
+          {%- endif %}
+
+          {%- if not steps['cluster-context'].output.keyVaultId %}
+
+          **Storage key not stored automatically**
+
+          Store the account key of `${{ steps['cluster-context'].output.storageAccount }}` in Key Vault
+          `${{ steps['variablizer'].output.keyVaultName }}` as `${{ steps['variablizer'].output.storageSecretPrefix }}-key`.
+          Loki and Tempo do not start without it. Setting `nestle.com/key-vault-id` on the region makes this automatic.
+          {%- endif %}
+
+          {%- if not steps['cluster-context'].output.appInsightsSecret %}
+
+          **App Insights**
+
+          Traces use the shared `${{ steps['cluster-context'].output.workspaceGroup }}` App Insights (`${{ steps['variablizer'].output.azureMonitorSecretName }}`).
+          Set `nestle.com/app-insights-secret` on the region to use the cluster's own App Insights.
+          {%- endif %}
+
+          **Key Vault secrets this cluster reads** (in `${{ steps['variablizer'].output.keyVaultName }}`; the policies stay non-compliant until they exist)
+          - `${{ steps['variablizer'].output.azureMonitorSecretName }}`: App Insights connection string
+          - `${{ steps['variablizer'].output.storageSecretPrefix }}-key`: storage account key (Loki, Tempo)
+          {%- if steps['variablizer'].output.prometheusRemoteWriteUrl %}
+          - `${{ steps['variablizer'].output.prometheusRemoteWriteSecret }}`: client secret for Prometheus remote write
+          {%- endif %}
+          {%- if steps['variablizer'].output.logsIngestionConfigured %}
+          - `${{ steps['variablizer'].output.logsIngestionSecret }}`: client secret for Logs Ingestion
+          {%- endif %}
+
+          **Choosing which namespaces send logs**
+
+          Every application namespace sends its logs to Loki (in the cluster). Only namespaces labelled
+          `nestle.com/forward-logs: "true"` also send their error logs to Azure. Add the label where the namespace
+          is managed (its `namespace.yaml` in the GitOps repo, or the ARO template checkbox).

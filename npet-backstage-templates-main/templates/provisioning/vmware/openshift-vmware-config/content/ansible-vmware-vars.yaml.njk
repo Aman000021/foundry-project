@@ -1,0 +1,48 @@
+---
+# Variables file for OCP cluster ${{ values.clusterName }}
+kv_vault_uri: ${{ values.kvVaultUri }}
+
+# These values will be fetched from Azure Keyvault
+kv_vcenter_username: ${{ values.kvVcenterUsername }}
+kv_vcenter_password: ${{ values.kvVcenterPassword }}
+kv_pullsecret: ${{ values.kvPullsecret }}
+kv_ssh_public_key: ${{ values.kvSshPublicKey }}
+
+# VMWare Configuration
+vcenter_hostname: ${{ values.vcenterHostname }}
+vsphere_datacenter: "${{ values.datacenterPath }}"
+vsphere_compute_resource: "${{ values.clusterPath }}"
+vsphere_datastore: "${{ values.datastorePath }}"
+vsphere_foldername: "${{ values.vmFolderPath }}"
+vsphere_region: "generated-region"
+vsphere_zone: "generated-zone"
+vsphere_failure_domain: "generated-failure-domain"
+# in which subnets should "master" nodes be created:
+vsphere_controlplane_network_name: "${{ values.controlplaneNetworkName }}"
+{%- if values.templateFound %}
+vsphere_rhcos_template: "${{ values.templateName }}"
+{%- else %}
+# WARNING: Template not found in vCenter with pattern '${{ values.templatePattern }}'
+vsphere_rhcos_template: "${{ values.clusterName }}-rhcos-generated-region-generated-zone"
+{%- endif %}
+
+# OpenShift Configuration
+{%- if not values.dnsResolved %}
+# WARNING: DNS resolution failed for api.${{ values.clusterName }}.${{ values.clusterBaseDomain }}
+# Update these IPs manually before running the playbook.
+{%- endif %}
+cluster_api_ip: "${{ values.clusterApiIp }}"
+cluster_ingress_ip: "${{ values.clusterIngressIp }}"
+cluster_base_domain: "${{ values.clusterBaseDomain }}"
+ocp_machine_network_cidr: "${{ values.machineNetworkCidr }}"
+ocp_os_image_url: "${{ values.ocpOsImageUrl }}"
+
+worker_pools:
+{%- for pool in values.workerPools %}
+  worker-vlan-${{ pool.vlan }}:
+    replicas: ${{ pool.replicas | default(1) }}
+    labels:
+      vlan: "${{ pool.vlan }}"
+      nestle.com/vlan: prd-vlan-${{ pool.vlan }}
+    vmware_network_name: ${{ pool.vmwareNetworkName }}
+{% endfor %}

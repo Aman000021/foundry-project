@@ -1,0 +1,95 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: azure-keyvault-test-template
+  title: Test Azure Key Vault Secret Creation
+  description: Simple test for azure-portal:create-keyvault-secret action using existing Key Vault
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - azure
+    - keyvault
+    - test
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: cloud-template
+
+  parameters:
+    - title: Test Secret Details
+      required:
+        - secretName
+        - secretValue
+      properties:
+        secretName:
+          title: Secret Name
+          type: string
+          description: Name for the test secret
+          default: test-secret-from-backstage
+        secretValue:
+          title: Secret Value
+          type: string
+          description: Value for the test secret
+          default: hello-world
+        clientId:
+          title: Azure Client ID
+          type: string
+          description: Azure service principal client ID
+        clientSecret:
+          title: Azure Client Secret
+          type: string
+          description: Azure service principal client secret
+        tenantId:
+          title: Azure Tenant ID
+          type: string
+          description: Azure tenant ID
+          default: 12a3af23-a769-4654-847f-958f3d479f4a
+
+  steps:
+    - action: debug:log
+      id: debug-start
+      name: Debug - Starting Test
+      input:
+        message: |
+          🚀 Testing Azure Key Vault Secret Creation
+          Key Vault: glblppidpdevopseuwekey
+          URI: https://glblppidpdevopseuwekey.vault.azure.net/
+          Secret Name: ${{ parameters.secretName }}
+          Tenant ID: ${{ parameters.tenantId }}
+          Client ID: ${{ parameters.clientId }}
+
+    - id: create-secret
+      action: azure-portal:create-keyvault-secret
+      name: Create Test Secret in Key Vault
+      input:
+        keyVaultUri: https://glblppidpdevopseuwekey.vault.azure.net/
+        clientId: ${{ parameters.clientId }}
+        clientSecret: ${{ parameters.clientSecret }}
+        tenantId: ${{ parameters.tenantId }}
+        secretName: ${{ parameters.secretName }}
+        secretValue: ${{ parameters.secretValue }}
+
+    - action: debug:log
+      id: debug-result
+      name: Debug - Action Result
+      input:
+        message: |
+          ✅ Azure Key Vault Secret Creation Result:
+          Success: ${{ steps['create-secret'].output.success }}
+          Secret URI: ${{ steps['create-secret'].output.secretUri }}
+
+  output:
+    text:
+      - title: Secret Created Successfully
+        content: |
+          Your test secret has been created in the Azure Key Vault!
+          
+          **Details:**
+          - Secret Name: ${{ parameters.secretName }}
+          - Secret URI: ${{ steps['create-secret'].output.secretUri }}
+          - Key Vault: glblppidpdevopseuwekey
+          
+          You can verify this in the Azure Portal or using Azure CLI:
+          ```bash
+          az keyvault secret show --vault-name glblppidpdevopseuwekey --name ${{ parameters.secretName }}
+          ```

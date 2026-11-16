@@ -1,0 +1,214 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: onboard-techdocs-debug
+  title: Onboard TechDocs to Existing Repository (Debug)
+  description: Debug variant to help inspect repoUrl parsing and organization detection
+  annotations:
+    nestle.com/template-visibility: internal
+  tags:
+    - techdocs
+    - debugging
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: github
+
+  parameters:
+    - title: Repository Information (Debug)
+      required:
+        - systemRef
+        - repoUrl
+      properties:
+        systemRef:
+          title: Parent System
+          description: System to associate this component to
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+        repoUrl:
+          title: Repository
+          type: string
+          description: Select the existing repository to onboard TechDocs to; organization is detected automatically
+          ui:field: GithubRepoFilter
+          ui:options:
+            requestUserCredentials:
+              secretsKey: USER_OAUTH_TOKEN
+              additionalScopes:
+                github:
+                  - workflow
+            allowedHosts:
+              - github.com
+            hideHost: true
+            hideOwner: true
+        includeExampleDocs:
+          title: Include sample documentation
+          type: boolean
+          description: Include sample documentation files to help get started
+          default: true
+
+  steps:
+    - action: debug:log
+      id: debug-raw-repo-url
+      name: Debug Raw Repo URL
+      input:
+        message: |
+          Raw repoUrl parameter: "${{ parameters.repoUrl }}"
+
+    - action: debug:log
+      id: debug-parsed-repo-url
+      name: Debug Parsed Repo URL (parseRepoUrl)
+      input:
+        message: |
+          Parsed via parseRepoUrl:
+            host: "${{ parameters.repoUrl | parseRepoUrl | pick('host') }}"
+            owner: "${{ parameters.repoUrl | parseRepoUrl | pick('owner') }}"
+            repo: "${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}"
+            json: ${{ parameters.repoUrl | parseRepoUrl | dump }}
+
+    - action: nestle:backstage-hostname-lookup
+      id: hostname-lookup
+      name: Hostname Lookup
+
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ parameters.systemRef }}
+
+    - action: debug:log
+      id: debug-system-entity
+      name: Debug System Entity
+      input:
+        message: |
+          System entity owner: "${{ steps['system-entity'].output.owner }}"
+          System entity ref: "${{ parameters.systemRef }}"
+
+    - action: nestle:backstage:variablizer
+      id: variablizer-repo
+      name: Sets Repository Variables
+      input:
+        variables:
+          repositoryName: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
+          organization: ${{ parameters.repoUrl | parseRepoUrl | pick('owner') | trim }}
+          repoUrl: ${{ parameters.repoUrl }}
+          repositoryHttpUrl: https://${{ parameters.repoUrl | parseRepoUrl | pick('host') }}/${{ parameters.repoUrl | parseRepoUrl | pick('owner') | trim }}/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
+          repositoryDisplayName: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') | replace('-', ' ') | title }}
+
+    - action: debug:log
+      id: debug-variablizer-output
+      name: Debug Variablizer Output
+      input:
+        message: |
+          Variablizer output:
+            organization: "${{ steps['variablizer-repo'].output.organization }}"
+            repositoryName: "${{ steps['variablizer-repo'].output.repositoryName }}"
+            repoUrl: "${{ steps['variablizer-repo'].output.repoUrl }}"
+            repositoryHttpUrl: "${{ steps['variablizer-repo'].output.repositoryHttpUrl }}"
+
+    - action: debug:log
+      id: debug-org-validation
+      name: Debug Org Validation Expression
+      input:
+        message: |
+          Org comparison debug:
+            raw organization: "${{ steps['variablizer-repo'].output.organization }}"
+            shouldFail (not in allowed set): ${{ steps['variablizer-repo'].output.organization not in ['nestle-devtest', 'nestle-it'] }}
+
+    - action: debug:log
+      id: debug-token
+      name: Debug Token Availability
+      input:
+        message: |
+          Secrets debug:
+            USER_OAUTH_TOKEN length: ${{ (secrets.USER_OAUTH_TOKEN | default('')) | length }}
+
+    - id: fetch
+      name: Fetch TechDocs Configuration
+      action: fetch:template
+      input:
+        url: ./content
+        targetPath: ./
+        values:
+          name: ${{ steps['variablizer-repo'].output.repositoryName }}
+          title: ${{ steps['variablizer-repo'].output.repositoryDisplayName }}
+          description: Documentation for ${{ steps['variablizer-repo'].output.repositoryDisplayName }}
+          siteName: ${{ steps['variablizer-repo'].output.repositoryDisplayName }}
+          siteDescription: Documentation for ${{ steps['variablizer-repo'].output.repositoryDisplayName }}
+          includeExampleDocs: ${{ parameters.includeExampleDocs }}
+          orgName: ${{ steps['variablizer-repo'].output.organization }}
+          repoName: ${{ steps['variablizer-repo'].output.repositoryName }}
+          owner: ${{ steps['system-entity'].output.owner }}
+          system: ${{ parameters.systemRef }}
+        templateFileExtension: true
+        replace: true
+
+    - id: publish-pr
+      name: Create Pull Request
+      action: publish:github:pull-request
+      input:
+        repoUrl: ${{ steps['variablizer-repo'].output.repoUrl }}
+        sourcePath: .
+        branchName: onboard-techdocs-${{ steps['variablizer-repo'].output.repositoryName }}
+        title: "🚀 Onboard TechDocs for ${{ steps['variablizer-repo'].output.repositoryDisplayName }}"
+        description: |
+          ## 📚 TechDocs Onboarding
+          
+          This PR adds TechDocs configuration to enable automatic documentation publishing.
+          
+          ### Before merging
+          - Review the new `.backstage/mkdocs.yml` configuration
+          - Confirm the `.backstage/catalog-info.yaml` update reflects the right ownership metadata
+          - Verify the GitHub Actions workflow `.github/workflows/publish-techdocs.yml`
+          - Ensure the repository already has the `TECHDOCS_AZURE_STORAGE_KEY` secret configured
+          
+          ### What's included:
+          - `.backstage/mkdocs.yml` - MkDocs configuration
+          - `.backstage/catalog-info.yaml` - Backstage entity definition with TechDocs reference
+          - `.github/workflows/publish-techdocs.yml` - CI/CD pipeline for automatic publishing
+          {% if parameters.includeExampleDocs -%}
+          - `docs/index.md` - Sample documentation to get started
+          {% endif -%}
+          
+          ### Next steps after merging:
+          1. The documentation will be automatically published
+          2. Use **Catalog -> Register Existing Component** in Backstage once the PR is merged so the updated TechDocs configuration is picked up
+          3. Documentation will appear under the "Docs" tab for the component after registration completes
+          
+          ### Configuration:
+          - **Component Name**: `${{ steps['variablizer-repo'].output.repositoryDisplayName }}`
+          - **Repository**: `${{ steps['variablizer-repo'].output.organization }}/${{ steps['variablizer-repo'].output.repositoryName }}`
+          
+          ---
+          *Generated by Backstage Onboard TechDocs Template*
+        gitAuthorName: Nestle Backstage
+        gitAuthorEmail: backstage@nestle.com
+        token: ${{ secrets.USER_OAUTH_TOKEN }}
+        update: true
+
+
+  output:
+    links:
+      - title: Pull Request
+        url: ${{ steps['publish-pr'].output.remoteUrl }}
+    text:
+      - title: Next Steps
+        content: |
+          🎉 **TechDocs Onboarding Pull Request Created! (Debug Template)**
+          
+          Your Pull Request has been created with all the necessary TechDocs configuration.
+          
+          **Before merging:**
+          - Review the configuration files added by the PR
+          - Confirm the repository still has the `TECHDOCS_AZURE_STORAGE_KEY` secret
+
+          **After merging:**
+          1. The documentation will be automatically published on the next workflow run targeting `main`
+          2. Register the component via **Catalog -> Register Existing Component** so Backstage ingests the updated TechDocs metadata
+          3. The Docs tab will populate once registration completes
+
+          **Helpful reminders:**
+          - Add additional markdown files to the `docs/` directory any time after merge
+          - Re-run the TechDocs workflow if you need to republish updates manually

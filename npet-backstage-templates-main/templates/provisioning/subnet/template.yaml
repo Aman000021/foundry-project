@@ -1,0 +1,95 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: provisioning-create-subnet
+  title: Create a Subnet
+  description: Creates a Subnet with the Provisioning Process.
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - cpw
+    - azure
+    - subnet
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: cloud-template
+
+  parameters:
+    - title: Parameters
+      required:
+        - resourceGroupRef
+      properties:
+        resourceGroupRef:
+          title: Parent ResourceGroup
+          description: ResourceGroup to associate the Subnet to.
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: Resource
+                spec.type: resource-group
+
+  steps:
+    - action: catalog:get:entity:data
+      id: resource-group-entity
+      name: Get ResourceGroup Entity
+      input:
+        ref: ${{ parameters.resourceGroupRef }}
+
+    - action: catalog:get:entity:data
+      id: system-entity
+      name: Get System Entity
+      input:
+        ref: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('nestle.com/parent-system') }}
+
+    - id: pipeline-run
+      name: PipelineRun
+      action: azure:pipeline:run:subnet
+      each: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('subnet-delegation', true) }}
+      input:
+        organization: nestle-it
+        project: STIG
+        branch: main
+        pipelineId: 1581
+        pipelineParameters:
+          no_subnet_req: 1
+          ServiceEndpoints_1: "False" # TODO
+          solution_resource_group_1: ${{ steps['resource-group-entity'].output.name }}
+          subnetdelegation_1: ${{ each.value.subnet_delegation }}
+          subnetprefix_1: ${{ each.value.subnet_prefix }}
+          subscriptionname_1: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('subscription-name') }}
+          ticket: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('ticket') }}
+        waitForPipelineCompletion: true
+        artifact:
+          artifactName: "TerraformScripts"
+          fileNamePattern: ".snt1.tf"
+
+    # this should only run on AKS templates
+    - id: dispatch-rbac
+      action: github:actions:dispatch-with-response
+      if: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('template-type') == 'npet-aks-template'}}
+      each: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('umi-federation', true) }}
+      name: Dispatch Github Action Workflow with inputs
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+        workflowId: subnet-delegation.yaml
+        branchOrTagName: main
+        waitForActionCompletion: true
+        timeout: 1200
+        workflowInputs:
+          delegatedSubnetName: ${{ steps['pipeline-run'].output.artifactOutput[each.key] | pick('delegatedSubnetName') | string }}
+          virtualNetworkName: ${{ steps['pipeline-run'].output.artifactOutput[each.key] | pick('vnetName') | string }}
+          virtualNetworkRg: ${{ steps['pipeline-run'].output.artifactOutput[each.key] | pick('resourceGroupName') | string }}
+          subscriptionId: ${{ steps['pipeline-run'].output.artifactOutput[each.key] | pick('subscriptionId') | string }}
+          umiPrincipalId: ${{ each.value.principal_id | string }}
+          CIDR: ${{ steps['pipeline-run'].output.artifactOutput[each.key] | pick('cidr') | string }}
+          systemSlug: ${{ steps['system-entity'].output.name }}
+          environmentName: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('environment-name') }}
+          resourceGroupName: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('resource-group-name') }}
+
+  output:
+    text:
+      - title: Pipeline Url(s)
+        content: "Pipeline Url(s): ${{ steps['pipeline-run'].output.pipelineUrl }}"

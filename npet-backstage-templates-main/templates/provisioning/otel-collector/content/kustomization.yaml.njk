@@ -1,0 +1,36 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: observability
+  annotations:
+    # The observability-update workflow in this repo registers this folder in
+    # the cluster's policyGenerator.yaml only when this annotation is present.
+    nestle.com/managed-by: backstage-otel-collector
+
+resources:
+  - ${{ values.catalogRelativePath }}
+  - cluster-logging/sa-log-forwarding.yaml
+  - cluster-logging/log-forwarding.yaml
+  - cluster-logging/azure-logs-ingestion-copy-secret.yaml
+  - cluster-observability/monitoringstack-copy-secret.yaml
+  - cluster-observability/monitoringstack.yaml
+  - cluster-observability/opentelemetrycollector.yaml
+  - cluster-observability/podmonitor.yaml
+  - cluster-observability/servicemonitor.yaml
+  - cluster-observability/opentelemetrycollectory-copy-secret.yaml
+  - cluster-observability/collector-rbac.yaml
+  - loki/
+  - tempo/
+  - grafana/
+
+# Per-application Tempo tenants, generated from the cluster's namespaces by the
+# observability-update workflow. Not part of this template.
+components:
+  - tenants/
+
+patches:
+  - path: patch-sub-channel-cluster-logging.yaml
+    target:
+      kind: Subscription
+      name: cluster-logging

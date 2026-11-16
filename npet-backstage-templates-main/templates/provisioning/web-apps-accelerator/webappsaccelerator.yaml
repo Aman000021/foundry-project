@@ -1,0 +1,329 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: web-apps-accelerator-template
+  title: Web Apps Accelerator
+  description: Provisions and deploys a standardized Web Application (Frontend, Backend, and Infrastructure) bound to an existing System via OIDC Service Principal authentication.
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - azure
+    - terraform
+    - web-apps
+    - accelerator
+    - oidc
+
+spec:
+  owner: group:default/AAD-backstage-glbl-webapp-accelerator-DEV
+  type: service
+
+  parameters:
+    - title: System & Business Context
+      required:
+        - systemRef
+        - name
+      properties:
+        systemRef:
+          title: Parent System
+          description: Select the Backstage System that owns this resource for governance, OIDC identity mapping, and financial tracking.
+          type: string
+          ui:field: EntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+        name:
+          title: New Application Name
+          type: string
+          description: e.g., myapp (lowercase alphanumeric and hyphens only)
+          pattern: "^[a-z0-9-]+$"
+
+    - title: Azure Infrastructure Overrides (Optional)
+      description: Specify Azure resource names if they are not defined in the selected System/Resource annotations.
+      properties:
+        overrideResourceGroupName:
+          title: Resource Group Name
+          type: string
+          description: Optional. Leave blank to inherit from annotations or auto-generate (rg-<app>-<env>).
+        overrideKeyVaultName:
+          title: Key Vault Name
+          type: string
+          description: Optional. Leave blank to inherit from annotations or auto-generate (kv-<app>-<env>).
+        overrideContainerRegistryName:
+          title: Container Registry (ACR) Name
+          type: string
+          description: Optional. Alphanumeric only. Leave blank to inherit or auto-generate.
+        overrideStorageAccountName:
+          title: Storage Account Name
+          type: string
+          description: Optional. Alphanumeric only (max 24 chars). Leave blank to inherit or auto-generate.
+        overrideVnetName:
+          title: Virtual Network (VNet) Name
+          type: string
+          description: Optional. Leave blank to inherit from annotations or auto-generate.
+        overrideVnetRgName:
+          title: VNet Resource Group Name
+          type: string
+          description: Optional. Leave blank to inherit from annotations or fallback to App Resource Group.
+        overrideSubnetBackend:
+          title: Backend Subnet Name
+          type: string
+          description: Optional. Leave blank to inherit from annotations or default to snet-be-<app>.
+        overrideSubnetFrontend:
+          title: Frontend Subnet Name
+          type: string
+          description: Optional. Leave blank to inherit from annotations or default to snet-fe-<app>.
+
+    - title: Environment Configuration
+      required:
+        - environmentName
+      properties:
+        environmentName:
+          title: Target Environment
+          type: string
+          default: dev
+          enum:
+            - dev
+            - qa
+            - prod
+
+  steps:
+    # 1. Fetch target System metadata from the Backstage catalog
+    - id: fetch-system-info
+      name: Fetch Parent System Metadata
+      action: catalog:fetch
+      input:
+        entityRef: ${{ parameters.systemRef }}
+
+    # 2. Download templates and inject OIDC variables from the System entity
+    - id: fetch-fe
+      name: Fetch Frontend Template
+      action: fetch:template
+      input:
+        url: https://github.com/nestle-it/FE/tree/main
+        targetPath: ./frontend
+        values:
+          name: ${{ parameters.name }}
+          system: ${{ steps['fetch-system-info'].output.entity.metadata.name }}
+          azure_client_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/client-id'] }}
+          azure_tenant_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/tenant-id'] or 'nestle.onmicrosoft.com' }}
+          azure_subscription_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/subscription-id'] }}
+          acr_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/container-registry']
+               or parameters.overrideContainerRegistryName 
+               or ('acr' + (parameters.name | replace('-', '')) + parameters.environmentName) }}
+
+    - id: fetch-be
+      name: Fetch Backend Template
+      action: fetch:template
+      input:
+        url: https://github.com/nestle-it/BE/tree/main
+        targetPath: ./backend
+        values:
+          name: ${{ parameters.name }}
+          system: ${{ steps['fetch-system-info'].output.entity.metadata.name }}
+          azure_client_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/client-id'] }}
+          azure_tenant_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/tenant-id'] or 'nestle.onmicrosoft.com' }}
+          azure_subscription_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/subscription-id'] }}
+          acr_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/container-registry']
+               or parameters.overrideContainerRegistryName 
+               or ('acr' + (parameters.name | replace('-', '')) + parameters.environmentName) }}
+
+    - id: fetch-infra
+      name: Fetch Infrastructure Code (Terraform with OIDC support)
+      action: fetch:template
+      input:
+        url: https://github.com/nestle-it/infra
+        targetPath: ./infra
+        copyWithoutTemplating:
+          - '**/*'
+          - '!.github/workflows/*.yaml'
+          - '!environments/**/*.njk'
+        values:
+          name: ${{ parameters.name }}
+          environmentName: ${{ parameters.environmentName }}
+          system: ${{ steps['fetch-system-info'].output.entity.metadata.name }}
+          
+          # Extract OIDC parameters based on nestle.com annotations schema
+          azure_client_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/client-id'] }}
+          azure_tenant_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/tenant-id'] or 'nestle.onmicrosoft.com' }}
+          azure_subscription_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/subscription-id'] }}
+          
+          # 1) Resource Group Name
+          rg_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/resource-group-name']
+               or parameters.overrideResourceGroupName 
+               or ('rg-' + parameters.name + '-' + parameters.environmentName) }}
+          
+          # 2) Key Vault
+          kv_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/key-vault']
+               or parameters.overrideKeyVaultName 
+               or ('kv-' + parameters.name + '-' + parameters.environmentName) }}
+          
+          # 3) Container Registry (alphanumeric only)
+          acr_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/container-registry']
+               or parameters.overrideContainerRegistryName 
+               or ('acr' + (parameters.name | replace('-', '')) + parameters.environmentName) }}
+          
+          # 4) VNet Name
+          vnet_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/virtual-network-name']
+               or parameters.overrideVnetName 
+               or ('vnet-' + parameters.name + '-' + parameters.environmentName) }}
+          
+          # 5) VNet Resource Group Name
+          vnet_rg_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/virtual-network-rg']
+               or parameters.overrideVnetRgName
+               or steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/resource-group-name']
+               or parameters.overrideResourceGroupName 
+               or ('rg-' + parameters.name + '-' + parameters.environmentName) }}
+          
+          # 6) Subnet Backend
+          subnet_backend: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/pep-subnet-name']
+               or parameters.overrideSubnetBackend 
+               or ('snet-be-' + parameters.name) }}
+          
+          # 7) Subnet Frontend
+          subnet_frontend: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/subnet-frontend']
+               or parameters.overrideSubnetFrontend 
+               or ('snet-fe-' + parameters.name) }}
+          
+          # 8) Storage Account (alphanumeric only)
+          storage_account_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/storage-account']
+               or parameters.overrideStorageAccountName
+               or ('st' + (parameters.name | replace('-', '')) + parameters.environmentName) }}
+
+    # 3. Publish generated repositories to GitHub
+    - id: publish-fe      
+      name: Publish Frontend Repository
+      action: publish:github
+      continueOnError: true
+      input:
+        description: Frontend for ${{ parameters.name }}
+        repoUrl: 'github.com?owner=nestle-it&repo=${{ parameters.name }}-fe'
+        sourcePath: ./frontend
+        repoVisibility: internal
+
+    - id: publish-be
+      name: Publish Backend Repository
+      action: publish:github
+      continueOnError: true
+      input:
+        description: Backend for ${{ parameters.name }}
+        repoUrl: 'github.com?owner=nestle-it&repo=${{ parameters.name }}-be'
+        sourcePath: ./backend
+        repoVisibility: internal
+
+    - id: publish-infra
+      name: Publish Infrastructure Repository
+      action: publish:github
+      continueOnError: true
+      input:
+        description: Infrastructure (Terraform) for ${{ parameters.name }}
+        repoUrl: 'github.com?owner=nestle-it&repo=${{ parameters.name }}-infra'
+        sourcePath: ./infra
+        repoVisibility: internal
+
+    # 4. Register newly created components in the Backstage catalog
+    - id: register-fe
+      name: Register Frontend in Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish-fe'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+    - id: register-be
+      name: Register Backend in Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish-be'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+    - id: register-infra
+      name: Register Infrastructure in Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish-infra'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+    # 5. Trigger the frontend build pipeline
+    - id: dispatch-fe-pipeline
+      name: Trigger Frontend Build Pipeline
+      action: github:actions:dispatch
+      input:
+        repoUrl: 'github.com?owner=nestle-it&repo=${{ parameters.name }}-fe'
+        workflowId: 'app-build.yaml'
+        branchOrTagName: main
+        workflowInputs:
+          acr_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/container-registry']
+               or parameters.overrideContainerRegistryName }}
+          client_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/client-id'] }}
+          tenant_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/tenant-id'] or 'nestle.onmicrosoft.com' }}
+          subscription_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/subscription-id'] }}
+
+    # 6. Trigger the backend build pipeline
+    - id: dispatch-be-pipeline
+      name: Trigger Backend Build Pipeline
+      action: github:actions:dispatch
+      input:
+        repoUrl: 'github.com?owner=nestle-it&repo=${{ parameters.name }}-be'
+        workflowId: 'app-build.yaml'
+        branchOrTagName: main
+        workflowInputs:
+          acr_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/container-registry']
+               or parameters.overrideContainerRegistryName }}
+          client_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/client-id'] }}
+          tenant_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/tenant-id'] or 'nestle.onmicrosoft.com' }}
+          subscription_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/subscription-id'] }}
+
+    # 7. Trigger the initial infrastructure deployment pipeline
+    - id: dispatch-infra-pipeline
+      name: Trigger Infrastructure Deployment Pipeline
+      action: github:actions:dispatch
+      input:
+        repoUrl: 'github.com?owner=nestle-it&repo=${{ parameters.name }}-infra'
+        workflowId: 'terraform.yaml'
+        branchOrTagName: main
+        workflowInputs:
+          environmentName: ${{ parameters.environmentName }}
+          rg_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/resource-group-name']
+               or parameters.overrideResourceGroupName }}
+          storage_account_name: >-
+            ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/storage-account']
+               or parameters.overrideStorageAccountName }}
+          client_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/client-id'] }}
+          tenant_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/tenant-id'] or 'nestle.onmicrosoft.com' }}
+          subscription_id: ${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/subscription-id'] }}
+
+  output:
+    links:
+      - title: Frontend Repository
+        url: 'https://github.com/nestle-it/${{ parameters.name }}-fe'
+      - title: Backend Repository
+        url: 'https://github.com/nestle-it/${{ parameters.name }}-be'
+      - title: Infrastructure Repository
+        url: 'https://github.com/nestle-it/${{ parameters.name }}-infra'
+
+    text:
+      - title: Scaffolding Completed Successfully
+        content: |
+          ### Application Provisioning Overview
+
+          * **Application Name:** `${{ parameters.name }}`
+          * **Associated System:** `${{ parameters.systemRef }}`
+          * **Target Resource Group:** `${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/resource-group-name'] or parameters.overrideResourceGroupName or ('rg-' + parameters.name + '-' + parameters.environmentName) }}`
+          * **Storage Account:** `${{ steps['fetch-system-info'].output.entity.metadata.annotations['nestle.com/storage-account'] or parameters.overrideStorageAccountName or ('st' + (parameters.name | replace('-', '')) + parameters.environmentName) }}`
+          * **Authentication Method:** `Workload Identity Federation (OIDC / Secretless)`
+
+          All entities have been created, registered in the Backstage catalog, and initial deployment pipelines have been dispatched under the System Service Principal identity.

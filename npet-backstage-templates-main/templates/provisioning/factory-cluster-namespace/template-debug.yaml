@@ -1,0 +1,256 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: provisioning-factory-cluster-namespace-debug
+  title: Provision Factory Cluster Namespace - DEBUG
+  description: |
+    Debug variant of the Factory Edge namespace provisioning template with additional logging.
+  annotations:
+    nestle.com/template-visibility: private
+  tags:
+    - factory
+    - edge
+    - debug
+spec:
+  owner: group:default/aad-backstage-administrators
+  type: cloud-template
+
+  parameters:
+    - title: Factory Namespace Details
+      required:
+        - ref
+        - siteRef
+        - appName
+      properties:
+        ref:
+          title: Parent System
+          description: Factory application system (e.g., Confluent).
+          type: string
+          ui:field: OwnedEntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: System
+                metadata.annotations.nestle.com/parent-process: factory-clusters
+        siteRef:
+          title: Factory Site
+          description: Select the physical factory site where this namespace will be provisioned.
+          type: string
+          ui:field: EntityPicker
+          ui:options:
+            allowArbitraryValues: false
+            catalogFilter:
+              - kind: FactorySite
+        appName:
+          title: Application Name
+          description: Name of the application deployed in the namespace (e.g., kafka, streaming).
+          type: string
+          pattern: "^([a-zA-Z][a-zA-Z0-9]*)(-[a-zA-Z0-9]+)*$"
+
+  steps:
+    - id: system-entity
+      name: Get System Entity
+      action: catalog:get:entity:data
+      input:
+        ref: ${{ parameters.ref }}
+
+    - id: site-entity
+      name: Get Site Entity
+      action: catalog:get:entity:data
+      input:
+        ref: ${{ parameters.siteRef }}
+
+    - id: variablizer
+      name: Prepare Variables
+      action: nestle:backstage:variablizer
+      input:
+        variables:
+          siteIdentifier: ${{ steps['site-entity'].output.annotations | parseEntityAnnotations('site-identifier') }}
+          siteName: ${{ steps['site-entity'].output.name }}
+          systemName: ${{ steps['system-entity'].output.name }}
+          namespaceEntityName: ${{ steps['system-entity'].output.name }}-${{ steps['site-entity'].output.name }}
+          environment: pr
+          namespace: fas-${{ steps['site-entity'].output.annotations | parseEntityAnnotations('site-identifier') }}-pr-${{ parameters.appName | lower }}
+          namespaceOwnerGroup: AAD-SG-backstage-fac-${{ steps['site-entity'].output.annotations | parseEntityAnnotations('site-identifier') }}-pr-${{ parameters.appName | lower }}-owner
+          apmId: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('apm-id') }}
+          technicalOwner: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('technical-owner') }}
+          clusterPath: ${{ steps['site-entity'].output.annotations | parseEntityAnnotations('cluster-path') }}
+          vlanId: ${{ steps['site-entity'].output.annotations | parseEntityAnnotations('vlan-id') }}
+          gitopsRepoOwner: ${{ steps['site-entity'].output.annotations | parseEntityAnnotations('gitops-repo-owner') }}
+          gitopsRepoName: ${{ steps['site-entity'].output.annotations | parseEntityAnnotations('gitops-repo-name') }}
+          quotaRequestsCpu: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('quota-requests-cpu') }}
+          quotaRequestsMemory: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('quota-requests-memory') }}
+          quotaPods: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('quota-pods') }}
+          quotaPvcs: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('quota-pvcs') }}
+          quotaStorage: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('quota-storage') }}
+          limitDefaultCpu: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('limit-default-cpu') }}
+          limitDefaultMemory: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('limit-default-memory') }}
+          limitRequestCpu: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('limit-request-cpu') }}
+          limitRequestMemory: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('limit-request-memory') }}
+
+    - id: debug-context
+      name: Debug Inputs
+      action: debug:log
+      input:
+        message: |
+          👤 **User**
+          - Username: ${{ user.entity.metadata.name }}
+          - Email: ${{ user.entity.spec.profile.email }}
+          - Entity Ref: ${{ user.ref }}
+
+          🏭 **Factory Namespace Request**
+          - Namespace: ${{ steps['variablizer'].output.namespace }}
+          - Site: ${{ steps['variablizer'].output.siteIdentifier }}
+          - Namespace Owner Group: ${{ steps['variablizer'].output.namespaceOwnerGroup }}
+          - GitOps Repository: ${{ steps['variablizer'].output.gitopsRepoOwner }}/${{ steps['variablizer'].output.gitopsRepoName }}
+          - GitOps Path: policies/cluster/${{ steps['variablizer'].output.clusterPath }}/namespace/${{ steps['variablizer'].output.namespace }}
+          - VLAN: ${{ steps['variablizer'].output.vlanId }}
+          - Technical Owner: ${{ steps['variablizer'].output.technicalOwner }}
+
+          📊 **Resource Settings**
+          - CPU Requests: ${{ steps['variablizer'].output.quotaRequestsCpu }}
+          - Memory Requests: ${{ steps['variablizer'].output.quotaRequestsMemory }}
+          - Pods: ${{ steps['variablizer'].output.quotaPods }}
+          - PVCs: ${{ steps['variablizer'].output.quotaPvcs }}
+          - Storage: ${{ steps['variablizer'].output.quotaStorage }}
+
+    # - id: namespace-group-create
+    #   name: Create Namespace Owner Group
+    #   action: github:actions:dispatch-with-response
+    #   input:
+    #     repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+    #     branchOrTagName: main
+    #     workflowId: entra-id-group-with-enterprise-app.yaml
+    #     waitForActionCompletion: true
+    #     timeout: 600
+    #     workflowInputs:
+    #       groupNames: ${{ steps['variablizer'].output.namespaceOwnerGroup }}
+    #       groupOwners: "${{ user.entity.spec.profile.email }}"
+
+    - id: fetch-kustomization
+      name: Template Kustomization
+      action: fetch:template:file
+      input:
+        url: ./content/kustomization.yaml.njk
+        targetPath: >-
+          ./argo-content/policies/cluster/${{ steps['variablizer'].output.clusterPath }}/namespace/${{ steps['variablizer'].output.namespace }}/kustomization.yaml
+
+    - id: fetch-groupsync
+      name: Template GroupSync
+      action: fetch:template:file
+      input:
+        url: ./content/groupsync.yaml.njk
+        targetPath: >-
+          ./argo-content/policies/cluster/${{ steps['variablizer'].output.clusterPath }}/namespace/${{ steps['variablizer'].output.namespace }}/resource/groupsync.yaml
+        values:
+          name: ${{ steps['variablizer'].output.namespace }}
+          namespaceOwnerGroup: ${{ steps['variablizer'].output.namespaceOwnerGroup }}
+
+    - id: fetch-namespace
+      name: Template Namespace Resources
+      action: fetch:template:file
+      input:
+        url: ./content/namespace.yaml.njk
+        targetPath: >-
+          ./argo-content/policies/cluster/${{ steps['variablizer'].output.clusterPath }}/namespace/${{ steps['variablizer'].output.namespace }}/resource/namespace.yaml
+        values:
+          name: ${{ steps['variablizer'].output.namespace }}
+          vlanId: ${{ steps['variablizer'].output.vlanId }}
+          namespaceOwnerGroup: ${{ steps['variablizer'].output.namespaceOwnerGroup }}
+          apmId: ${{ steps['variablizer'].output.apmId }}
+          environment: ${{ steps['variablizer'].output.environment }}
+          applicationName: ${{ parameters.appName }}
+          technicalOwner: ${{ steps['variablizer'].output.technicalOwner }}
+          quotaRequestsCpu: ${{ steps['variablizer'].output.quotaRequestsCpu }}
+          quotaRequestsMemory: ${{ steps['variablizer'].output.quotaRequestsMemory }}
+          quotaPods: ${{ steps['variablizer'].output.quotaPods }}
+          quotaPvcs: ${{ steps['variablizer'].output.quotaPvcs }}
+          quotaStorage: ${{ steps['variablizer'].output.quotaStorage }}
+          limitDefaultCpu: ${{ steps['variablizer'].output.limitDefaultCpu }}
+          limitDefaultMemory: ${{ steps['variablizer'].output.limitDefaultMemory }}
+          limitRequestCpu: ${{ steps['variablizer'].output.limitRequestCpu }}
+          limitRequestMemory: ${{ steps['variablizer'].output.limitRequestMemory }}
+
+    - id: publish-resource
+      name: Factory Namespace Pull Request
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?owner=${{ steps['variablizer'].output.gitopsRepoOwner }}&repo=${{ steps['variablizer'].output.gitopsRepoName }}
+        sourcePath: argo-content
+        branchName: factory-${{ steps['variablizer'].output.namespace }}
+        title: "Factory namespace - ${{ steps['variablizer'].output.namespace }}"
+        description: |
+          Automates factory namespace provisioning for `${{ steps['variablizer'].output.namespace }}`.
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+    - id: fetch-catalog-info
+      name: Create Namespace Entity
+      action: fetch:template:file
+      input:
+        url: ./content/catalog-info.yaml.njk
+        targetPath: ./catalog-content/${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/namespaces/${{ steps['variablizer'].output.namespaceEntityName }}.yaml
+        values:
+          namespaceEntityName: ${{ steps['variablizer'].output.namespaceEntityName }}
+          systemName: ${{ steps['variablizer'].output.systemName }}
+          siteName: ${{ steps['variablizer'].output.siteName }}
+          namespace: ${{ steps['variablizer'].output.namespace }}
+          applicationName: ${{ parameters.appName }}
+          siteEntityName: ${{ steps['site-entity'].output.name }}
+          siteIdentifier: ${{ steps['variablizer'].output.siteIdentifier }}
+          clusterPath: ${{ steps['variablizer'].output.clusterPath }}
+          vlanId: ${{ steps['variablizer'].output.vlanId }}
+          environment: ${{ steps['variablizer'].output.environment }}
+          apmId: ${{ steps['variablizer'].output.apmId }}
+          technicalOwner: ${{ steps['variablizer'].output.technicalOwner }}
+          gitopsRepoOwner: ${{ steps['variablizer'].output.gitopsRepoOwner }}
+          gitopsRepoName: ${{ steps['variablizer'].output.gitopsRepoName }}
+          namespaceOwnerGroup: ${{ steps['variablizer'].output.namespaceOwnerGroup }}
+          systemRef: ${{ parameters.ref }}
+
+    - id: publish-catalog
+      name: Create PR in Catalog Repo for Namespace Entity
+      action: publish:github:pull-request
+      input:
+        sourcePath: ./catalog-content/${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/namespaces
+        targetPath: ${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/namespaces
+        repoUrl: github.com?owner=nestle-devtest&repo=npet-backstage-catalog
+        branchName: factory-namespace-${{ steps['variablizer'].output.namespace }}
+        title: "Factory Namespace Entity - ${{ steps['variablizer'].output.namespace }}"
+        description: "Register namespace entity for ${{ steps['variablizer'].output.namespace }} at site ${{ steps['variablizer'].output.siteIdentifier }}"
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+    - id: register-namespace-entity
+      name: Register Namespace Entity in Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: https://github.com/nestle-devtest/npet-backstage-catalog/blob/main
+        catalogInfoPath: /${{ steps['system-entity'].output.domain.split('/')[1] }}/systems/${{ steps['system-entity'].output.name }}/namespaces/${{ steps['variablizer'].output.namespaceEntityName }}.yaml
+        optional: true
+
+  output:
+    links:
+      - title: Factory Namespace Pull Request
+        url: ${{ steps['publish-resource'].output.remoteUrl }}
+      - title: Catalog Entity Registration PR
+        url: ${{ steps['publish-catalog'].output.remoteUrl }}
+    text:
+      - title: Factory Namespace Summary
+        content: |
+          ✅ Namespace: `${{ steps['variablizer'].output.namespace }}`
+
+          🏭 Site: `${{ steps['variablizer'].output.siteIdentifier }}`
+
+          🔐 RBAC Group: `${{ steps['variablizer'].output.namespaceOwnerGroup }}`
+
+          🌐 VLAN: `${{ steps['variablizer'].output.vlanId }}`
+          
+          🗂️ GitOps Path: `policies/cluster/${{ steps['variablizer'].output.clusterPath }}/namespace/${{ steps['variablizer'].output.namespace }}`
+
+          ⚠️ Follow-up:
+          - Review and merge the pull request to apply the namespace.
+          - Add additional users to `${{ steps['variablizer'].output.namespaceOwnerGroup }}` as needed for access.

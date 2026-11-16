@@ -1,0 +1,20 @@
+name: Publish Documentation
+
+on:
+  push:
+    branches: [main]
+    paths: 
+      - 'docs/**'
+      - '.backstage/mkdocs.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish-docs:
+    uses: nestle-it/npet-backstage-automation/.github/workflows/publish-techdocs.yaml@main
+    with:
+      entity-name: ${{ values.name }}
+    secrets: inherit

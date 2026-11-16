@@ -1,0 +1,60 @@
+{%- if values.includeExampleDocs %}
+# ${{ values.siteName }}
+
+Welcome to the documentation for **${{ values.title | default(values.name) }}**.
+
+## Overview
+
+${{ values.description }}
+
+This documentation is automatically published to Azure Storage using TechDocs and GitHub Actions.
+
+## Getting Started
+
+This documentation site is built using [MkDocs](https://www.mkdocs.org/) with the TechDocs plugin for Backstage.
+
+### Adding New Documentation
+
+1. Create new Markdown files in the `docs/` directory
+2. Update the navigation in `.backstage/mkdocs.yml` if needed
+3. Commit and push your changes to the `main` branch
+4. The documentation will be automatically published via GitHub Actions
+
+### Documentation Structure
+
+```
+docs/
+├── index.md          # This file
+└── ...               # Additional documentation files
+```
+
+## Features
+
+- ✅ Automatic publishing to Azure Storage
+- ✅ Integration with Backstage TechDocs
+- ✅ GitHub Actions CI/CD pipeline
+- ✅ MkDocs with Material theme support
+
+## Contributing
+
+To contribute to this documentation:
+
+1. Fork the repository
+2. Create a new branch for your changes
+3. Make your edits in the `docs/` directory
+4. Submit a pull request
+
+---
+
+*This documentation is powered by [Backstage TechDocs](https://backstage.io/docs/features/techdocs/)*
+{%- else %}
+# ${{ values.siteName }}
+
+Welcome to your documentation site!
+
+## Getting Started
+
+Add your documentation files to the `docs/` directory and update the navigation in `.backstage/mkdocs.yml`.
+
+Your documentation will be automatically published to Azure Storage when you push to the main branch.
+{%- endif %}

@@ -1,0 +1,91 @@
+---
+# Application logs of every application namespace (the application input already
+# leaves out openshift-*, kube-* and default) to the in-cluster LokiStack.
+apiVersion: observability.openshift.io/v1
+kind: ClusterLogForwarder
+metadata:
+  name: loki-forwarder
+  namespace: openshift-logging
+spec:
+  managementState: Managed
+  serviceAccount:
+    name: logging-collector
+  outputs:
+    - name: logging-loki
+      type: lokiStack
+      lokiStack:
+        authentication:
+          token:
+            from: serviceAccount
+        target:
+          name: logging-loki
+          namespace: openshift-logging
+      tls:
+        ca:
+          configMapName: openshift-service-ca.crt
+          key: service-ca.crt
+  pipelines:
+    - name: app-to-loki
+      inputRefs:
+        - application
+      outputRefs:
+        - logging-loki
+{%- if not values.logsIngestionConfigured %}
+
+# PLACEHOLDERS: the Logs Ingestion values below are not set yet, so this forwarder is
+# Unmanaged (inactive). Set the nestle.com/logs-ingestion-* annotations on the region
+# entity and re-run the "Deploy OTEL Collector in OpenShift" template.
+{%- endif %}
+---
+apiVersion: observability.openshift.io/v1
+kind: ClusterLogForwarder
+metadata:
+  name: nestle-logging-monitor-app
+  namespace: openshift-logging
+spec:
+  managementState: ${{ 'Managed' if values.logsIngestionConfigured else 'Unmanaged' }}
+  serviceAccount:
+    name: logging-collector
+  inputs:
+    - name: application
+      type: application
+  filters:
+    # Opt-in per namespace: only namespaces labelled nestle.com/forward-logs: "true".
+    - name: keep-opted-in-namespaces
+      type: drop
+      drop:
+        - test:
+            - field: .kubernetes.namespace_labels."nestle.com/forward-logs"
+              notMatches: "true"
+    - name: keep-error-logs
+      type: drop
+      drop:
+        - test:
+            - field: .level
+              notMatches: error
+  outputs:
+    - name: logging-azure
+      type: azureLogsIngestion
+      azureLogsIngestion:
+        url: ${{ values.logsIngestionUrl }}
+        dcrImmutableId: ${{ values.logsIngestionDcrId | dump }}
+        streamName: ${{ values.logsIngestionStream | dump }}
+        authentication:
+          type: clientSecret
+          clientSecret:
+            tenantId: ${{ values.azureTenantId | dump }}
+            clientId: ${{ values.logsIngestionClientId | dump }}
+            secret:
+              secretName: azure-logs-ingestion
+              key: client-secret
+      rateLimit:
+        maxRecordsPerSecond: 1000
+  pipelines:
+    - name: app-pipe
+      inputRefs:
+        - application
+      filterRefs:
+        - keep-opted-in-namespaces
+        - keep-error-logs
+      outputRefs:
+        - logging-azure

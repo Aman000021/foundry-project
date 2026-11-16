@@ -1,0 +1,103 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: provisioning-create-entrypoint
+  title: Create a Deployment Entrypoint
+  description: |
+    Adds a new deployment entrypoint to an existing regional system.
+
+    This template:
+    - Writes the entrypoint deployment manifest to the system GitOps repository,
+      one file per selected environment (`<env>/<system>-<entrypoint>.yaml`)
+    - Creates a `deployment` Resource entity per environment in the catalog repository
+
+    No repository is created — the entrypoint deploys from the repository informed below.
+  annotations:
+    nestle.com/template-visibility: private
+    nestle.com/template-scope: regional
+  tags:
+    - deployment
+    - entrypoint
+    - resources
+    - regional
+spec:
+  owner: group:default/aad-sg-backstage-ams-admins
+  type: cloud-template
+
+  parameters:
+    - $yaml: ../../../parameters/provisioning/regional-system-picker.yaml
+
+    - $yaml: ../../../parameters/provisioning/entrypoint.yaml
+
+    - title: Environments
+      required: [environments]
+      properties:
+        environments:
+          title: Environments
+          description: Environments to create this entrypoint in.
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [dv, ts, np, pp, pr]
+            enumNames:
+              - Development (dv)
+              - Test (ts)
+              - Non-Production (np)
+              - Pre-Production (pp)
+              - Production (pr)
+          uniqueItems: true
+          ui:widget: checkboxes
+
+  steps:
+    - $yaml: ../../../steps/catalog/assert-system-techlead-create.yaml
+
+    - id: system-entity
+      name: Get System Entity
+      action: catalog:get:entity:data
+      input:
+        ref: ${{ parameters.system }}
+
+    - id: clone-gitops
+      name: Clone GitOps Repository
+      action: github:extras:clone
+      input:
+        repoUrl: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('gitOpsRepoUrl') }}
+        workingDirectory: gitops
+
+    - $yaml: ../../../steps/provisioning/entrypoint/gitops.yaml
+
+    - id: push-gitops
+      name: Push GitOps Changes
+      action: github:extras:push
+      input:
+        repoUrl: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('gitOpsRepoUrl') }}
+        workingDirectory: gitops
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        gitCommitMessage: "chore: add ${{ parameters.name }} entrypoint manifests for ${{ steps['system-entity'].output.name }}"
+
+    - $yaml: ../../../steps/provisioning/entrypoint/resource.yaml
+
+    - $yaml: ../../../steps/catalog/get-entities-config.yaml
+
+    - id: catalog-pr
+      name: Catalog Pull Request
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?owner=${{ steps.getEntitiesConfig.output.entities.owner }}&repo=${{ steps.getEntitiesConfig.output.entities.repoName }}
+        branchName: entity-creation-entrypoint-${{ steps['system-entity'].output.name }}-${{ parameters.name }}-${{ "" | now | replace(":", "-") }}
+        title: Entity Creation - Entrypoint ${{ parameters.name }} (${{ steps['system-entity'].output.name }})
+        description: Backstage deployment entrypoint entity creation for system ${{ steps['system-entity'].output.name }}
+        sourcePath: ./${{ steps['system-entity'].output.domain.split('/')[1] }}
+        targetPath: ${{ steps['system-entity'].output.domain.split('/')[1] }}
+        gitAuthorName: ${{ user.entity.metadata.name }}
+        gitAuthorEmail: ${{ user.entity.spec.profile.email }}
+        update: true
+
+  output:
+    links:
+      - title: GitOps Repository
+        url: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('gitOpsRepoUrl') }}
+      - title: Catalog Pull Request
+        url: ${{ steps['catalog-pr'].output.remoteUrl }}

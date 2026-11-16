@@ -1,0 +1,15 @@
+#The names of these projects will be inherited from jinja
+
+# Unique SonarQube Project Id(Key) - you can get it your SonarQube url.
+sonar.projectKey=azdo-${{ values.repository }}
+
+# Optional: Project Name, to change your project name, change it here and run a scan.
+sonar.projectName=azdo-${{ values.repository }}
+
+# Path is relative to the sonar-project.properties file.
+# Replace "\" by "/" on Windows.
+# This property is optional if sonar.modules is set.
+# sonar.sources=.
+
+# Encoding of the source code. Default is default system encoding
+sonar.sourceEncoding=UTF-8
