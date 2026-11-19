@@ -1,9 +1,0 @@
-id: pushEntities
-name: Push Entities Action
-description: Push entities template to GitHub
-action: github:extras:push
-input:
-  repoUrl: https://github.com/nestle-devtest/npet-backstage-catalog.git
-  workingDirectory: .
-  gitAuthorName: ${{ user.entity.metadata.name }}
-  gitAuthorEmail: ${{ user.entity.spec.profile.email }}

@@ -1,6 +1,0 @@
-id: import
-name: Import Resource Group Resources
-description: Import resources from an existing resource group into the current project.
-action: azure:resource-group:import-resources
-input:
-  resourceGroupId: ${{ parameters.resourceGroupId }}

@@ -1,5 +1,0 @@
-title: Resource Group Information
-properties:
-  resourceGroupId:
-    type: string
-    description: Resource Group ID

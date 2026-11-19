@@ -1,2 +1,0 @@
-title: GitHub Repository
-url: ${{ steps['publish'].output.remoteUrl }}

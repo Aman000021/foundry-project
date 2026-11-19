@@ -1,8 +1,0 @@
-id: cloneEntities
-name: Clone Entities Action
-description: Clone entities template from GitHub
-action: github:extras:clone
-input:
-  repoUrl: ${{ steps.getEntitiesConfig.output.entities.repoUrl }}
-  workingDirectory: entities
-  useToken: true

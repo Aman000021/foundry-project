@@ -1,9 +1,0 @@
-# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
-- id: gitops-add-team
-  name: Add GitHub Team to GitOps Repository
-  description: Grant the newly created team write access to the GitOps repository.
-  action: github:teams:add-team-to-repository
-  input:
-    slug: ${{ steps['github-team-create'].output.slug }}
-    repoUrl: github.com?owner=${{ parameters.gitopsRepoUrl.split('/')[3] if parameters.gitopsAlreadyExists else steps.getEntitiesConfig.output.entities.owner }}&repo=${{ (parameters.gitopsRepoUrl.split('/')[4] | replace('.git', '')) if parameters.gitopsAlreadyExists else (parameters.scope + '-' + parameters.name + '-gitops') }}
-    permission: push

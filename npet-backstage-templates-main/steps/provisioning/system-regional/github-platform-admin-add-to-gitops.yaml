@@ -1,9 +1,0 @@
-# Requires a prior getEntitiesConfig step in the including template (steps/catalog/get-entities-config.yaml)
-- id: gitops-add-platform-admin-team
-  name: Add Platform Admin Team to GitOps Repository
-  description: Grant the br-nbra-platform-admin team admin access to the GitOps repository.
-  action: github:teams:add-team-to-repository
-  input:
-    slug: br-nbra-platform-admin
-    repoUrl: github.com?owner=${{ parameters.gitopsRepoUrl.split('/')[3] if parameters.gitopsAlreadyExists else steps.getEntitiesConfig.output.entities.owner }}&repo=${{ (parameters.gitopsRepoUrl.split('/')[4] | replace('.git', '')) if parameters.gitopsAlreadyExists else (parameters.scope + '-' + parameters.name + '-gitops') }}
-    permission: admin

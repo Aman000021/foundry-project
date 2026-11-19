@@ -1,9 +1,0 @@
-id: github-team-create
-action: github:teams:create
-name: Create GitHub Team(s)
-if: ${{ parameters.createGitHubTeam }}
-each: ${{ parameters.teamNames }}
-input:
-  repoUrl: ${{ parameters.repoUrl }}
-  maintainers: ${{ parameters.maintainers }}
-  teamName: ${{ each.value }}

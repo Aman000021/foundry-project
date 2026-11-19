@@ -1,7 +1,0 @@
-id: cloneEntities
-name: Clone Entities Extra Action
-description: Clone entities template from GitHub
-action: github:extras:clone
-input:
-  repoUrl: https://github.com/nestle-devtest/npet-backstage-catalog.git
-  workingDirectory: .

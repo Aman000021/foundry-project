@@ -1,6 +1,0 @@
-id: promoteenv
-name: '[Promote] Replicate entities'
-action: promote:system
-input:
-  systemToBePromoted: ${{ parameters.systemToBePromoted }}
-  promotionType: ${{ parameters.promotionType }}
