@@ -1,0 +1,6 @@
+environment_name     = "dv"
+solution_name        = "agentservice"
+resource_group_name  = "glbl-dv-adifoundryops-adi-euwe-rgp"
+shared_subnet_name   = "emna-np-g-adi-euwe-002-snt"
+acr_name             = "glbldvplatform644acr"
+platform_rg          = "glbl-dv-adifoundryhub-adi-euwe-rgp"

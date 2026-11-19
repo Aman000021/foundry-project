@@ -1,0 +1,14 @@
+# - resource_name: agentservice
+  #- resource_index: "dev01001"
+
+  # - resource_index: "dev01002"
+
+  # - resource_index: "dev01003"
+
+  # - resource_index: "dev01006"
+
+  - resource_index: "dev01"
+    managed_subnet: "glbl-dv-adifoundryhub-adi-euwe-fd.ape7.adi.snt"
+
+  - resource_index: "dev02"
+    managed_subnet: "glbl-dv-adifoundryhub-adi-euwe-fd.ape8.adi.snt"    

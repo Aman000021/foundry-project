@@ -1,0 +1,11 @@
+# - resource_name: agentservice
+  #- resource_index: "mkt001"
+
+  # - resource_index: "mkt002"
+
+  # - resource_index: "mkt003"
+
+  # - resource_index: "mkt006"
+
+  - resource_index: "mkt001"
+    managed_subnet: "glbl-pp-adifoundryhub-adi-euwe-fd.ape.adi.snt"
