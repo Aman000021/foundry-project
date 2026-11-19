@@ -1,0 +1,98 @@
+name: Deploy Hosted Agent
+
+on:
+  workflow_call:
+    inputs:
+      agentName:
+        description: Name of Agent
+        type: string
+        required: true
+      agentSize:
+        description: Resources limit of Agent
+        type: string
+        required: true
+        default: small
+      appName:
+        description: Name of usecase
+        type: string
+        required: true
+      environment:
+        required: true
+        type: string
+      runner_type:
+        required: true
+        type: string
+      hostedAgentDir:
+          description: Path of hosted agent code
+          type: string
+          required: true
+      deployAgentDir:
+          description: Path of deployment code
+          type: string
+          required: true
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+env:
+  CPU: ${{ fromJSON('{"small":"1","medium":"2","large":"4"}')[inputs.agentSize] }}
+  MEMORY: ${{ fromJSON('{"small":"2Gi","medium":"4Gi","large":"8Gi"}')[inputs.agentSize] }}
+
+jobs:
+  deploy-dv-hosted-agent-image:
+    runs-on: ${{ inputs.runner_type }}
+    if: ${{ inputs.environment == 'dv' }}
+    environment: ${{ inputs.environment }}
+    env:
+      ACR_NAME: "glbldvplatform644acr"
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "false"
+      OTEL_RESOURCE_ATTRIBUTES: "service.namespace=nestle-ai-agents,service.version=1.0.0,deployment.environment.name=dev,telemetry.schema.version=1.0.0,domain.name=ai-services,ai.app.id=hosted-agent-init,ai.use_case=telemetry-validation,owner.team=adi-foundry,data.classification=internal"
+      ENABLE_MESSAGE_EVENTS: "false"
+      ENABLE_SENSITIVE_DATA: "false"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      #Login to ACR
+      - name: ACR login
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Docker Build
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.hostedAgentDir }}
+          file: ${{ inputs.hostedAgentDir }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR_NAME }}.azurecr.io/${{ inputs.appName }}/hosted-agent-image:${{ inputs.environment }}-latest
+            ${{ env.ACR_NAME }}.azurecr.io/${{ inputs.appName }}/hosted-agent-image:${{ github.sha }}
+
+      - name: Register Hosted Agent version
+        working-directory: ${{ inputs.deployAgentDir }}
+        env:
+          FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
+          AGENT_NAME: ${{ inputs.agentName }}
+          ACR_LOGIN_SERVER: ${{ env.ACR_NAME }}.azurecr.io
+          AGENT_IMAGE: ${{ inputs.appName }}/hosted-agent-image:${{ inputs.environment }}-latest
+          AGENT_CPU: ${{ env.CPU }}
+          AGENT_MEMORY: ${{ env.MEMORY }}
+          NESTLE_MODEL_DEPLOYMENT: ${{ vars.NESTLE_MODEL_DEPLOYMENT }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install -r requirements.txt
+          python register_agent.py
+      
