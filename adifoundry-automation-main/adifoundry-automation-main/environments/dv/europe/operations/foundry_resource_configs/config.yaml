@@ -1,3 +1,0 @@
-  - resource_index: "ops01"
-    managed_subnet: "glbl-dv-adifoundryops-adi-euwe-fd.ape.adi.snt"
-#check subnet before committing

@@ -1,8 +1,0 @@
-# - project_name: <project_name>
-#   project_segment: dev01
-#   foundry_index: "dev01001"
-#   agent_builder_group_id: <agent_builder_group_id>
-#   tags:
-#     technical_owner: "<technical_owner_email>"
-#     apm_id: "<apm_id>"
-#     cost_center: "<cost_center>"
