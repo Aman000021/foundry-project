@@ -1,4 +1,4 @@
-variable "resource_group_name" {
+variable "platform_rg" {
     type = string
     description = "Name of the Resource Group"  
 }
@@ -22,6 +22,9 @@ variable "log_analytics_name" {
   type = string
   description = "Name of the Log analytics"
 }
+variable "ais_name" {
+  type = string
+}
 variable "storage_account" {
   type = string
 }
@@ -29,5 +32,17 @@ variable "acr_name" {
   type = string
 }
 variable "acr_pep" {
+  type = string
+}
+variable "global_acrPush_group" {
+  type = string
+}
+variable "global_acrPull_group" {
+  type = string
+}
+variable "global_appInsights_publisher_group" {
+  type = string
+}
+variable "sustain_aad_group" {
   type = string
 }

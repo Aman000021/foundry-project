@@ -18,7 +18,7 @@ resource "azurerm_log_analytics_solution" "logs_solution" {
   }
 }
 resource "azurerm_application_insights" "app_insights" {
-  name                   = replace(var.log_analytics_name, "log", "ais")
+  name                   = var.app_insights_name
   location               = data.azurerm_resource_group.rg_name.location
   resource_group_name    = var.resource_group_name
   workspace_id           = azurerm_log_analytics_workspace.logs_workspace.id

@@ -114,7 +114,7 @@ spec:
           ui:disabled: true
           ui:widget: hidden
           oneOf:
-            - const: emna-np-g-adi-euwe-002-snt
+            - const: emna-np-g.4-adi-euwe-001-snt
         subid:
           title: Subscription ID
           type: string
@@ -175,16 +175,6 @@ spec:
           type: string
           description: Application name (only alphanumeric with 15 charecters length)
           pattern: "^[A-Za-z0-9]{1,15}$"
-        # builderAADgroup:
-        #   title: Agent Builder AAD Group(agent create permission will be provided)
-        #   type: string
-        #   description: Object ID format (for e-g 8f3c2b1a-7d45-4e91-9c23-6a8b5d2f1047)
-        #   pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
-        # readerAADgroup:
-        #   title: Foundry Account Reader AAD Group(Only read permission will be provided)
-        #   type: string
-        #   description: Object ID format (for e-g 8f3c2b1a-7d45-4e91-9c23-6a8b5d2f1047)
-        #   pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
         request:
           title: Service-now Request Number
           type: string
@@ -208,8 +198,6 @@ spec:
         - segment
         - location
         - appName
-        # - builderAADgroup
-        # - readerAADgroup
         - githubreporequired
         - visibility
 
@@ -239,17 +227,6 @@ spec:
           name: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ parameters.appName }}
           organization: ${{ 'nestle-it' if 'idp.nestle.com' in steps['hostname-lookup'].output.hostname else 'nestle-devtest' }}
           createdSourceRepo: https://github.com/${{ 'nestle-it' if 'idp.nestle.com' in steps['hostname-lookup'].output.hostname else 'nestle-devtest' }}/${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ parameters.appName }}
-
-    # - action: nestle:backstage:variablizer
-    #   id: variablizer-dynamic-entities
-    #   name: Sets Template Type Variable
-    #   input:
-    #     variables:
-    #       templateType: ${{ steps['component-entity'].output.annotations | parseEntityAnnotations('nestle.com/template-type') if parameters.addEnvironmentToExistingRepo else parameters.templates }}
-    #       region: ${{ steps['component-entity'].output.annotations | parseEntityAnnotations('nestle.com/region') if parameters.addEnvironmentToExistingRepo else parameters.region }}
-    #       parentSystem: ${{ steps['component-entity'].output.system if parameters.addEnvironmentToExistingRepo else parameters.systemRef }}
-    #       appName: ${{ steps['component-entity'].output.annotations | parseEntityAnnotations('nestle.com/application-name') if parameters.addEnvironmentToExistingRepo else parameters.appName }}
-    #       environmentJson: ${{ steps['component-entity'].output.annotations | parseEntityAnnotations('nestle.com/environments') if parameters.addEnvironmentToExistingRepo else '[]' }}
 
     - id: fetch-payload
       action: fetch:template:file
@@ -300,10 +277,11 @@ spec:
     - id: create-aad
       name: Dispatch AAD group creation pipeline
       action: github:actions:dispatch-with-response
-      # each:
-      #   - agentbuilder
-      #   - projectreader
-      #   - agentconsumer
+      each:
+        - agentbuilder
+        - projectreader
+        - agentconsumer
+        - agentmgr
       input:
         repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
         workflowId: entra-id-group.yaml
@@ -311,8 +289,8 @@ spec:
         waitForActionCompletion: true
         timeout: 1200
         workflowInputs:
-            groupNames: AAD-SG-backstage-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ parameters.environment }}-${{ parameters.appName }}-agentbuilder-owner
-            groupOwners: "${{ user.entity.spec.profile.email }}"
+            groupNames: AAD-SG-backstage-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ parameters.environment }}-${{ parameters.appName }}-${{ each.value }}-owner
+            groupOwners: "${{ steps['system-entity'].output.annotations | parseEntityAnnotations('technical-owner') }}"
 
     - id: get-aad-objectid-agentbuilder
       name: Get Agent Builder Group Object ID
@@ -320,41 +298,26 @@ spec:
       input:
         groupName: AAD-SG-backstage-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ parameters.environment }}-${{ parameters.appName }}-agentbuilder-owner
 
-    # - id: get-aad-objectid-projectreader
-    #   name: Get Project Reader Group Object ID
-    #   action: azure-portal:get-aad-group-id
-    #   input:
-    #     groupName: AAD-SG-backstage-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ parameters.environment }}-${{ parameters.appName }}-projectreader-owner
+    - id: get-aad-objectid-projectreader
+      name: Get Project Reader Group Object ID
+      action: azure-portal:get-aad-group-id
+      input:
+        groupName: AAD-SG-backstage-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ parameters.environment }}-${{ parameters.appName }}-projectreader-owner
 
-    # - id: get-aad-objectid-agentconsumer
-    #   name: Get Agent Consumer Group Object ID
-    #   action: azure-portal:get-aad-group-id
-    #   input:
-    #     groupName: AAD-SG-backstage-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ parameters.environment }}-${{ parameters.appName }}-agentconsumer-owner
+    - id: get-aad-objectid-agentconsumer
+      name: Get Agent Consumer Group Object ID
+      action: azure-portal:get-aad-group-id
+      input:
+        groupName: AAD-SG-backstage-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ parameters.environment }}-${{ parameters.appName }}-agentconsumer-owner
 
-    # - id: foundry-agent-service-pipeline-run
-    #   action: github:actions:dispatch-with-response
-    #   name: ADI Foundry Github Action
-    #   input:
-    #     repoUrl: github.com?repo=adifoundry-automation&owner=nestle-it
-    #     workflowId: agent-capability-deploy.yml
-    #     branchOrTagName: acr_permission_umi
-    #     waitForActionCompletion: true
-    #     timeout: 1200
-    #     workflowInputs:
-    #       # branch: 'main'
-    #       environment: ${{ parameters.environment }}
-    #       capability: ${{ parameters.capability }}
-    #       segment: ${{ parameters.segment }}
-    #       location: ${{ parameters.location }}
-    #       appName: ${{ parameters.appName }}
-    #       builderAADgroup: ${{ steps['get-aad-objectid-agentbuilder'].output.groupObjectId }}
-    #       readerAADgroup: ${{ steps['get-aad-objectid-projectreader'].output.groupObjectId }}
-    #       snowNumber: ${{ parameters.request }}
+    - id: get-aad-objectid-agentmgr
+      name: Get Agent Consumer Group Object ID
+      action: azure-portal:get-aad-group-id
+      input:
+        groupName: AAD-SG-backstage-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}-${{ steps['system-entity'].output.annotations | parseEntityAnnotations('context') }}-${{ parameters.environment }}-${{ parameters.appName }}-agentmgr-owner
 
     - action: catalog:get:entity
       id: resource-group-entity-validation
-      # if: ${{ parameters.capability == 'hostedagent' }}
       name: Validate Resource Group Entity
       input:
         ref: resource:${{ parameters.namespace }}/${{ parameters.rgname }}
@@ -419,48 +382,24 @@ spec:
         gitAuthorEmail: ${{ user.entity.spec.profile.email }}
         update: true
 
-    # - id: create-umi
-    #   action: github:actions:dispatch-with-response
-    #   # if: ${{ parameters.capability == 'hostedagent' }}
-    #   name: Create Managed Identity
-    #   input:
-    #     repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
-    #     workflowId: sharedinfra-baseline.yaml
-    #     branchOrTagName: main
-    #     waitForActionCompletion: true
-    #     timeout: 1200
-    #     workflowInputs:
-    #       organization: ${{ steps['variablizer-repo'].output.organization }}
-    #       environmentName: ${{ parameters.environment }}
-    #       umiName: glbl-${{ parameters.environment }}-${{ parameters.appName }}-umi
-    #       location: ${{ 'westeurope' if parameters.location == "europe" }}
-    #       repo: ${{ steps['variablizer-repo'].output.name }}
-    #       resourceGroupName: ${{ parameters.rgname }}
-    #       subscriptionId: ${{ parameters.subid }}
-    #       systemSlug: ${{ steps['system-entity'].output.name }}
-
-    # - id: setup base line infra
-    #   action: github:actions:dispatch-with-response
-    #   # if: ${{ parameters.capability == 'hostedagent' }}
-    #   name: Created Azure Resources in RG
-    #   input:
-    #     repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
-    #     workflowId: sharedinfra-baseline.yaml
-    #     branchOrTagName: main
-    #     waitForActionCompletion: true
-    #     timeout: 1200
-    #     workflowInputs:
-    #       organization: ${{ steps['variablizer-repo'].output.organization }}
-    #       variables: ${{ steps.deserialise.output.content | string }}
-    #       environmentName: ${{ parameters.environment }}
-    #       # umiName: glbl-${{ parameters.environment }}-${{ parameters.appName }}-umi
-    #       # location: ${{ 'westeurope' if parameters.location == "europe" }}
-    #       # repo: ${{ steps['variablizer-repo'].output.name }}
-    #       resourceGroupName: ${{ parameters.rgname }}
-    #       subscriptionName: ${{ parameters.subname }}
-    #       subscriptionId: ${{ parameters.subid }}
-    #       systemSlug: ${{ steps['system-entity'].output.name }}
-    #       templates: ${{ parameters.capability }}
+    - id: setup base line infra
+      action: github:actions:dispatch-with-response
+      name: Created Azure Resources in RG
+      input:
+        repoUrl: github.com?owner=nestle-it&repo=npet-backstage-automation
+        workflowId: sharedinfra-baseline.yaml
+        branchOrTagName: main
+        waitForActionCompletion: true
+        timeout: 1200
+        workflowInputs:
+          organization: ${{ steps['variablizer-repo'].output.organization }}
+          variables: ${{ steps.deserialise.output.content | string }}
+          environmentName: ${{ parameters.environment }}
+          resourceGroupName: ${{ parameters.rgname }}
+          subscriptionName: ${{ parameters.subname }}
+          subscriptionId: ${{ parameters.subid }}
+          systemSlug: ${{ steps['system-entity'].output.name }}
+          templates: ${{ parameters.capability }}
 
     # - action: catalog:get:entity
     #   id: resource-group-entity-validation
@@ -470,7 +409,6 @@ spec:
     #     ref: resource:${{ parameters.namespace }}/${{ parameters.rgname }}
 
     - id: register-catalog-resource-group
-      # if: ${{ steps['resource-group-entity-validation'].output.exists == false }}
       if: ${{ true if(steps['resource-group-entity-validation'].output.exists == false) }}
       name: Register Catalog Resource Group
       action: catalog:register
@@ -491,14 +429,15 @@ spec:
       input:
         ref: resource:${{ parameters.namespace }}/${{ parameters.rgname }}
 
-    # - action: nestle:backstage:variablizer
-    #   id: variablizer-umi-federation
-    #   name: Sets UMI Variables
-    #   # each: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('umi-federation', true) }}
-    #   input:
-    #     variables:
-    #       umiFederationClientId: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('nestle.com/umi-federation-id') }}
-    #       umiFederationPrincipalId: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('nestle.com/umi-principal-id') }}
+    - action: nestle:backstage:variablizer
+      id: variablizer-umi-federation
+      name: Sets Variables
+      each: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('umi-federation', true) }}
+      input:
+        variables:
+          umiFederationClientId: ${{ each.value.client_id | string }}
+          umiFederationName: ${{ each.value.name | string }}
+          umiFederationObjectId: ${{ each.value.principal_id }}
 
     - id: foundry-agent-service-pipeline-run
       action: github:actions:dispatch-with-response
@@ -510,16 +449,17 @@ spec:
         waitForActionCompletion: true
         timeout: 1200
         workflowInputs:
-          # branch: 'main'
           environment: ${{ parameters.environment }}
           capability: ${{ parameters.capability }}
           segment: ${{ parameters.segment }}
           location: ${{ parameters.location }}
           appName: ${{ parameters.appName }}
           builderAADgroup: ${{ steps['get-aad-objectid-agentbuilder'].output.groupObjectId }}
-          readerAADgroup: ${{ steps['get-aad-objectid-agentbuilder'].output.groupObjectId }}
+          readerAADgroup: ${{ steps['get-aad-objectid-projectreader'].output.groupObjectId }}
+          consumerAADgroup: ${{ steps['get-aad-objectid-agentconsumer'].output.groupObjectId }}
+          agentmgrAADgroup: ${{ steps['get-aad-objectid-agentmgr'].output.groupObjectId }}
           tagsJson: ${{ steps.deserialise.output.content | string }}
-          # umiObjectId: ${{ steps['resource-group-entity'].output.annotations | parseEntityAnnotations('nestle.com/umi-principal-id') }}
+          umiObjectId: ${{ steps['variablizer-umi-federation'].output.umiFederationObjectId | string }}
           snowNumber: ${{ parameters.request }}
 
     - id: github-team-create
@@ -556,14 +496,6 @@ spec:
         targetPath: content
         values:
           runner: ${{ ['self-hosted', 'Linux', 'X64'] if steps['variablizer-repo'].output.organization == 'nestle-it' else 'nams-gh-managed-linux-small' }}
-          repository: ${{ steps['variablizer-repo'].output.name }}
-          templateType: ${{ parameters.capability }}
-          technicalOwner: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('technical-owner') }}
-          ticket: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('ticket') }}
-          solutionName: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('solution-name') }}
-          context: ${{ parameters.appName }}
-          scope: ${{ steps['system-entity'].output.annotations | parseEntityAnnotations('scope') }}
-          region: ${{ (parameters.location == "europe" and "euwe") }}
           teamName: ${{ steps['variablizer-repo'].output.name | string }}
         templateFileExtension: true
         replace: true
@@ -597,16 +529,10 @@ spec:
         repoUrl: github.com?owner=${{ steps['variablizer-repo'].output.organization }}&repo=${{ steps['variablizer-repo'].output.name }}
         environment: ${{ parameters.environment }}
         environmentVariables:
-          # CLIENT_ID: ${{ steps['variablizer-umi-federation'].output.umiFederationClientId | string }}
+          CLIENT_ID: ${{ steps['variablizer-umi-federation'].output.umiFederationClientId | string }}
           # FOUNDRY_PROJECT_ENDPOINT: 
           SUBSCRIPTION_ID: ${{ parameters.subid }}
           TENANT_ID: ${{ parameters.tenantid }}
-          ACR_NAME: ${{ (parameters.environment == "dv" and parameters.devacrname) }}
-          AGENT_NAME: "sample-agent"
-          OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "false"
-          OTEL_RESOURCE_ATTRIBUTES: "service.namespace=nestle-ai-agents,service.version=1.0.0,deployment.environment.name=dev,telemetry.schema.version=1.0.0,domain.name=ai-services,ai.app.id=hosted-agent-init,ai.use_case=telemetry-validation,owner.team=adi-foundry,data.classification=internal"
-          ENABLE_MESSAGE_EVENTS: "false"
-          ENABLE_SENSITIVE_DATA: "false"
 
     - action: github:branch-protection:create
       name: Setup Branch Protection
@@ -641,4 +567,4 @@ spec:
 
           Please login to `ai.azure.com` after 5 min to use above foundry project
 
-          **Github Repo URL(if opted to create hosted-agent capability):** github.com?owner=${{ steps['variablizer-repo'].output.organization }}&repo=${{ steps['variablizer-repo'].output.name }}
+          **Github Repo URL(if opted to create hosted-agent capability):** github.com/${{ steps['variablizer-repo'].output.organization }}/${{ steps['variablizer-repo'].output.name }}

@@ -11,9 +11,10 @@ on:
       appName: { type: string, required: true }
       builderAADgroup: { type: string, required: true }
       readerAADgroup: { type: string, required: true }
-      # projectTags: { type: string, required: true }
+      consumerAADgroup: { type: string, required: true }
+      agentmgrAADgroup: { type: string, required: true }
       snowNumber: { type: string, required: true }
-      # umiObjectId: { type: string, required: false }
+      umiObjectId: { type: string, required: false }
       tagsJson: { type: string, required: false }
       UUID: { description: 'UUID for Backstage dispatch-with-response tracking', required: false, default: '' }
         
@@ -26,10 +27,11 @@ on:
       appName: { type: string, required: true }
       builderAADgroup: { type: string, required: true }
       readerAADgroup: { type: string, required: true }
+      consumerAADgroup: { type: string, required: true }
+      agentmgrAADgroup: { type: string, required: true }
       snowNumber: { type: string, required: true }
-      # umiObjectId: { type: string, required: false }
+      umiObjectId: { type: string, required: false }
       tagsJson: { type: string, required: false }
-      # projectTags: { type: string, required: true }
 
 permissions:
   contents: read
@@ -55,13 +57,15 @@ jobs:
          if: ${{ github.event.inputs.capability == 'hostedagent' }}
          uses: ./.github/workflows/hosted-agent-deploy.yml
          with: 
-             environment: 'dv'
+             environment: ${{ github.event.inputs.environment }}
              segment: ${{ github.event.inputs.segment }}
              location: ${{ github.event.inputs.location }}
              appName: ${{ github.event.inputs.appName }}
              builderAADgroup: ${{ github.event.inputs.builderAADgroup }}
              readerAADgroup: ${{ github.event.inputs.readerAADgroup }}
+             consumerAADgroup: ${{ github.event.inputs.consumerAADgroup }}
+             agentmgrAADgroup: ${{ github.event.inputs.agentmgrAADgroup }}
              snowNumber: ${{ github.event.inputs.snowNumber }}
-            #  umiObjectId: ${{ github.event.inputs.umiObjectId }}
+             umiObjectId: ${{ github.event.inputs.umiObjectId }}
              tagsJson: ${{ github.event.inputs.tagsJson }}
          secrets: inherit

@@ -18,5 +18,9 @@ terraform {
       source  = "azure/azapi"
       version = "~> 2.11.0"
     }
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 3.0"
+    }
   }
 }

@@ -10,9 +10,10 @@ on:
       appName: { type: string, required: true }
       builderAADgroup: { type: string, required: true }
       readerAADgroup: { type: string, required: true }
-      # projectTags: { type: string, required: true }
+      consumerAADgroup: { type: string, required: true }
+      agentmgrAADgroup: { type: string, required: true }
       snowNumber: { type: string, required: true }
-      # umiObjectId: { type: string, required: true }
+      umiObjectId: { type: string, required: true }
       tagsJson: { type: string, required: true }
       UUID: { description: 'UUID for Backstage dispatch-with-response tracking', required: false, default: '' }
         
@@ -24,10 +25,11 @@ on:
       appName: { type: string, required: true }
       builderAADgroup: { type: string, required: true }
       readerAADgroup: { type: string, required: true }
+      consumerAADgroup: { type: string, required: true }
+      agentmgrAADgroup: { type: string, required: true }
       snowNumber: { type: string, required: true }
-      # umiObjectId: { type: string, required: true }
+      umiObjectId: { type: string, required: true }
       tagsJson: { type: string, required: true }
-      # projectTags: { type: string, required: true }
 
 permissions:
   contents: read
@@ -122,12 +124,16 @@ jobs:
         run: |
           terraform plan \
           -var-file="${{ env.ENV_PATH }}/${{ inputs.segment }}/hosted-agent-service.tfvars" \
+          -var-file="${{ env.ENV_PATH }}/platform.tfvars" \
           -var="tags=tf_tags.json" \
           -var="project_segment=${{ inputs.segment }}" \
           -var="foundry_location=${{ inputs.location }}" \
           -var="project_name=${{ inputs.appName }}" \
           -var="agent_builder_group_id=${{ inputs.builderAADgroup }}" \
           -var="account_reader_group_id=${{ inputs.readerAADgroup }}" \
+          -var="agent_consumer_group_id=${{ inputs.consumerAADgroup }}" \
+          -var="agent_mgr_group_id=${{ inputs.agentmgrAADgroup }}" \
+          -var="umi_object_id=${{ inputs.umiObjectId }}" \
           -var="foundry_index=${foundry_index}" \
           -out=hostedagenttfplan
 # -var="umi_object_id=${{ inputs.umiObjectId }}" \
@@ -193,6 +199,50 @@ jobs:
       - name: Terraform apply
         run: |
           terraform apply hostedagenttfplan
+
+      - name: Get foundry project principal ID
+        id: tf_output
+        run: |
+          PRINCIPAL_ID=$(terraform output -raw ai_foundry_project_principal_id)
+          echo "principal_id=$PRINCIPAL_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Add foundry project identity to ACR pull group
+        id: foundry-mi-acr-pull
+        env:
+          PRINCIPAL_ID: ${{ steps.tf_output.outputs.principal_id }}
+        # continue-on-error: true
+        shell: bash
+        run: |
+          az ad group member add \
+            --group ${{ vars.GLOBAL_ACR_PULL_GROUP }} \
+            --member-id ${{ env.PRINCIPAL_ID }}
+
+      - name: Add UMI to ACR push group
+        id: umi-acr-push
+        # continue-on-error: true
+        shell: bash
+        run: |
+          az ad group member add \
+            --group ${{ vars.GLOBAL_ACR_PUSH_GROUP }} \
+            --member-id ${{ inputs.umiObjectId }}
+
+      - name: Add Agent Manager Group to Metrics Publisher group
+        id: agent-mgr-ais-metrics-publisher
+        # continue-on-error: true
+        shell: bash
+        run: |
+          az ad group member add \
+            --group ${{ vars.GLOBAL_AIS_METRICS_PUBLISHER_GROUP }} \
+            --member-id ${{ inputs.agentmgrAADgroup }}
+
+      - name: Add UMI to Metrics Publisher group
+        id: umi-ais-metrics-publisher
+        # continue-on-error: true
+        shell: bash
+        run: |
+          az ad group member add \
+            --group ${{ vars.GLOBAL_AIS_METRICS_PUBLISHER_GROUP }} \
+            --member-id ${{ inputs.umiObjectId }}
 
       - name: Update usecase reader AAD group
         id: ad-group-update

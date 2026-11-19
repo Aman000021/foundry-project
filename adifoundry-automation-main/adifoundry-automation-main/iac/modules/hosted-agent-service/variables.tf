@@ -37,6 +37,12 @@ variable "project_name" {
 variable "agent_builder_group_id" {
   type = string
 }
+variable "agent_consumer_group_id" {
+  type = string
+}
+variable "agent_mgr_group_id" {
+  type = string
+}
 variable "foundry_index" {
   type = string
 }
@@ -46,12 +52,24 @@ variable "foundry_index" {
 variable "acr_name" {
   type = string
 }
+variable "ais_name" {
+  type = string
+}
 variable "platform_rg" {
   type = string
 }
-# variable "umi_object_id" {
-#   type = string
-# }
+variable "umi_object_id" {
+  type = string
+}
 variable "tags" {
+  type = string
+}
+variable "global_acrPush_group" {
+  type = string
+}
+variable "global_acrPull_group" {
+  type = string
+}
+variable "global_appInsights_publisher_group" {
   type = string
 }

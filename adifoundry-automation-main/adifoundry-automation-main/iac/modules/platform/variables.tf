@@ -22,6 +22,9 @@ variable "log_analytics_name" {
   type = string
   description = "Name of the Log analytics"
 }
+variable "app_insights_name" {
+  type = string
+}
 variable "acr_name" {
   type = string
   description = "Name of container registry"
@@ -29,4 +32,16 @@ variable "acr_name" {
 variable "acr_pep" {
   type = string
   description = "Name of container registry private endpoint"
+}
+variable "global_acrPush_group" {
+  type = string
+}
+variable "global_acrPull_group" {
+  type = string
+}
+variable "global_appInsights_publisher_group" {
+  type = string
+}
+variable "sustain_aad_group" {
+  type = string
 }

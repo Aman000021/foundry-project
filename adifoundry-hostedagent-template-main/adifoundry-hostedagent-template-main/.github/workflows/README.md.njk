@@ -18,13 +18,19 @@ Workflows are located under `.github/workflows` and are responsible for:
 
 ---
 
-## Available Workflows (Aligned with Repo)
+## Available Workflows
 
-- agent.yaml 
-  User inputs to select environment to deploy the agent
+- **agent.yaml**<br>
+  - User inputs to select environment and application name
+  - it builds the code as container image and push it to centralized image registry(ACR)
 
-- hosted-agent-deploy.yml  
-  Deploys hosted agent in foundry project
+- **hosted-agent-deploy.yml**<br>  
+  - Deploys hosted agent in foundry project
+  - It requires few environment variables to be set to register the agent in foundry project. Please make sure below variables are set in github environment
+    - FOUNDRY_PROJECT_ENDPOINT
+    - AGNET_IMAGE
+    - AGENT_NAME
+    - ACR_LOGIN_SERVER 
 
 ---
 
@@ -45,7 +51,8 @@ You can manually trigger workflows:
 1. Go to **GitHub Repository**
 2. Click **Actions**
 3. Select **Build Hosted Agent Image** workflow and click **Run workflow**
-4. Select a environment
-5. Click **Run**
+4. Enter project name
+5. Select a environment
+6. Click **Run**
 
 ---

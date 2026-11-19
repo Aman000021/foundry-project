@@ -19,6 +19,12 @@ data "azurerm_container_registry" "platform_acr" {
   resource_group_name = var.platform_rg
 }
 
+##Get App insights details
+data "azurerm_application_insights" "platform_ais" {
+  name = var.ais_name
+  resource_group_name = var.platform_rg
+}
+
 # data "azuread_group" "project_manager" {
 #   display_name     = var.prj_manager_group
 #   security_enabled = true

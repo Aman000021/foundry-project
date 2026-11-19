@@ -16,6 +16,20 @@ The implementation contains two parts:
 - Access to the approved Azure Container Registry(UMI should have AcrPush permission)
 - Permission to create Hosted Agent versions in the target Foundry project (UMI should be added to project builder AAD group)
 
+## Who has access
+
+To commit code to this repository, you need to be in the <a href="https://github.com/orgs/nestle-it/teams/${{ values.teamName }}-write" target="_blank">${{ values.teamName }}-write </a> team. If you're not yet part of this group, please ask the repository owner to add you.
+
+There is another team, <a href="https://github.com/orgs/nestle-it/teams/${{ values.teamName }}-admin" target="_blank">${{ values.teamName }}-admin </a>, that has access to the repository settings. Only admin group members have access to Environment settings (definitions, variables, secrets). So if you are responsible for maintaining deployments (such as defining or changing environment settings), ask to be added to this team. Note: regular developers can run deployments; they just cannot change deployment or repo settings, protection/approval rules...
+
+![Settings button, visible only to repo admins](images/settings-button.png)
+
+
+## Who owns the groups and can add members
+
+For any inquiries regarding the repository, membership request or issue related to these groups, please reach out to the technical owner, ${{ values.technicalOwner }}.
+
+
 ---
 
 # 1. Minimal Hosted Agent
@@ -34,6 +48,10 @@ The derived agent proves that:
 
 ```text
 sample-agent
+├── deploy
+    ├── agent_environment.py
+    ├── deploy_telemetry.py
+    ├── register_agent.py
 ├── hosted-agent
     ├── .dockerignore
     ├── Dockerfile
@@ -46,10 +64,11 @@ The Hosted Agent image does not need a solution `requirements.txt` because its o
 
 ## Hosted Agent `Dockerfile`
 
-```dockerfile
-ARG BASE_REGISTRY=glbldvplatform644acr.azurecr.io
-FROM ${BASE_REGISTRY}/hosted-agent:dev-init
+ACR should be used from our platform
 
+```dockerfile
+ARG BASE_REGISTRY=<platform-acr-name>.azurecr.io
+FROM ${BASE_REGISTRY}/<golden-image>
 COPY --chown=root:root ./src ./src
 
 ENV AGENT_MODULE=src.hosted_agent \
@@ -64,13 +83,13 @@ From the Hosted Agent directory:
 
 ```bash
 docker build \
-  -t glbldvplatform644acr.azurecr.io/hosted-agent-dev-01:init-v1 \
+  -t glbldvplatform644acr.azurecr.io/<project-name>/hosted-agent-dev-01:init-v1 \
   .
 ```
 
 ```bash
 docker push \
-  glbldvplatform644acr.azurecr.io/hosted-agent-dev-01:init-v1
+  <platform-ACR-name>.azurecr.io/hosted-agent-dev-01:init-v1
 ```
 
 Do not deploy `hosted-agent:dev-init` directly. That image contains the shared runtime but not the derived agent configuration and solution module.
@@ -78,28 +97,6 @@ Do not deploy `hosted-agent:dev-init` directly. That image contains the shared r
 ---
 
 # 3. Deployment utility
-
-## Purpose
-
-The deployment utility:
-
-1. Loads deployment configuration from `.env.deploy`.
-2. Authenticates with `DefaultAzureCredential`.
-3. constructs the full ACR image reference.
-4. creates a new container-based Hosted Agent version;
-5. declares the Responses protocol version;
-6. polls the version until it becomes active, fails, or reaches the polling limit.
-
-The deployment utility is local tooling. Its dependencies do not belong in the golden image.
-
-## Deployment files
-
-```text
-deploy/
-├── .env.deploy
-├── register_agent.py
-└── requirements.txt
-```
 
 ## Deployment `requirements.txt`
 
@@ -119,7 +116,7 @@ Use plain values, without HTML link markup:
 FOUNDRY_PROJECT_ENDPOINT=<foundry-project-endpoint>
 AGENT_NAME=hosted-agent-init
 ACR_LOGIN_SERVER=glbldvplatform644acr.azurecr.io
-AGENT_IMAGE=hosted-agent-dev-01:init-v1
+AGENT_IMAGE=<project-name>/<image-name>:<tag>
 AGENT_CPU=1
 AGENT_MEMORY=2Gi
 AGENT_PROTOCOL_VERSION=1.0.0
